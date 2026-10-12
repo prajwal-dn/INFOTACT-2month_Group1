@@ -1,0 +1,5 @@
+  vcan0  0C8   [8]  1F 2A 00 00 00 00 00 3B
+  vcan0  1A0   [4]  0D 2C 00 64
+  vcan0  2F1   [8]  00 00 12 34 56 78 9A BC
+  vcan0  0C8   [8]  1F 2B 00 00 00 00 00 3C
+  vcan0  3B2   [2]  FF EE
