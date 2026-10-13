@@ -1,0 +1,12 @@
+CAN-Sentinel normal traffic generator
+Interface: vcan0 (virtual interface only)
+RPM: 3000 and speed: 60 km/h, target 100 ms
+Coolant: 90 C, target 1000 ms
+Scheduling: CLOCK_MONOTONIC absolute deadlines
+Press Ctrl+C to stop.
+
+
+Traffic generator stopping.
+RPM      ID 0x100: sent=100, skipped_periods=0, errors=0
+SPEED    ID 0x101: sent=100, skipped_periods=0, errors=0
+COOLANT  ID 0x102: sent=10, skipped_periods=0, errors=0
