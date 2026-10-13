@@ -1,0 +1,9 @@
+# Local compiled binaries
+/build/
+
+# Intermediate timing-test logs
+data/day3_generator_final.txt
+data/day3_generator_output.txt
+data/day3_timing.log
+data/day3_timing_clean.log
+data/day3_timing_final.log
