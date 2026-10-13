@@ -54,3 +54,19 @@ this test, but do not establish a hard real-time guarantee.
 
 All testing was performed on the virtual `vcan0` interface.
 No physical vehicle or production automotive network was used.
+
+## 8. Generator Diagnostic Summary
+
+A separate diagnostic run of the updated generator reported:
+
+| CAN Signal | Frames Sent | Skipped Periods | Send Errors |
+|---|---:|---:|---:|
+| Engine RPM (0x100) | 340 | 9 | 0 |
+| Vehicle speed (0x101) | 340 | 9 | 0 |
+| Coolant temperature (0x102) | 35 | 0 | 0 |
+
+No CAN write errors were reported in this run. RPM and speed missed
+periods were skipped rather than sent as catch-up bursts.
+
+These counters represent a separate diagnostic run from the
+timing-statistics sample in Section 4.
