@@ -1,0 +1,40 @@
+CAN-Sentinel configurable normal traffic
+Virtual interface: vcan0
+RPM/speed interval: 500 ms
+Coolant interval: 5000 ms
+RPM range: 2000-4000 | Speed range: 0-120 km/h
+Coolant range: 80-100 C
+Scheduling: CLOCK_MONOTONIC absolute deadlines
+Press Ctrl+C to stop.
+
+RPM      0x100#0C51 value=3153
+SPEED    0x101#002E value=46
+COOLANT  0x102#0056 value=86
+RPM      0x100#09BD value=2493
+SPEED    0x101#0050 value=80
+RPM      0x100#0B83 value=2947
+SPEED    0x101#001F value=31
+RPM      0x100#0DC7 value=3527
+SPEED    0x101#0073 value=115
+RPM      0x100#0F29 value=3881
+SPEED    0x101#004D value=77
+RPM      0x100#0B47 value=2887
+SPEED    0x101#0022 value=34
+RPM      0x100#0BF8 value=3064
+SPEED    0x101#0059 value=89
+RPM      0x100#0B7E value=2942
+SPEED    0x101#006D value=109
+RPM      0x100#0AB9 value=2745
+SPEED    0x101#0020 value=32
+RPM      0x100#0D37 value=3383
+SPEED    0x101#0023 value=35
+RPM      0x100#09BC value=2492
+SPEED    0x101#0021 value=33
+COOLANT  0x102#0062 value=98
+RPM      0x100#0F16 value=3862
+SPEED    0x101#0078 value=120
+
+Generator stopping.
+RPM      ID 0x100: sent=12, skipped_periods=0, errors=0
+SPEED    ID 0x101: sent=12, skipped_periods=0, errors=0
+COOLANT  ID 0x102: sent=2, skipped_periods=0, errors=0

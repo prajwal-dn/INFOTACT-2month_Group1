@@ -1,4 +1,4 @@
-#define _GNU_SOURCE
+#define _POSIX_C_SOURCE 200809L
 
 #include <errno.h>
 #include <linux/can.h>
@@ -50,7 +50,7 @@ static int64_t now_ns(void)
 
     if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
         perror("clock_gettime");
-        exit(EXIT_FAILURE);
+        return -1;
     }
 
     return (int64_t)ts.tv_sec * NS_PER_SEC + ts.tv_nsec;
@@ -70,13 +70,14 @@ static int sleep_until_ns(int64_t deadline_ns)
         if (rc == 0)
             return 0;
 
-        if (rc != EINTR) {
-            fprintf(stderr, "clock_nanosleep: %s\n", strerror(rc));
-            return -1;
-        }
+        if (rc == EINTR)
+            continue;
+
+        fprintf(stderr, "clock_nanosleep: %s\n", strerror(rc));
+        return -1;
     }
 
-    return -1;
+    return 1;
 }
 
 static int open_can_socket(void)
@@ -84,7 +85,8 @@ static int open_can_socket(void)
     unsigned int index = if_nametoindex(CAN_IFACE);
 
     if (index == 0) {
-        fprintf(stderr, "Interface %s not found or unavailable.\n",
+        fprintf(stderr,
+                "Interface %s is unavailable. Bring vcan0 up first.\n",
                 CAN_IFACE);
         return -1;
     }
@@ -117,11 +119,25 @@ static int open_can_socket(void)
     return sock;
 }
 
-/* 0 = sent, 1 = temporary send failure, -1 = fatal send failure. */
-static int send_message(int sock, const struct message *msg)
+/* Values follow the project's initial simulation ranges. */
+static uint16_t random_value(canid_t id)
+{
+    if (id == 0x100)
+        return (uint16_t)(2000 + rand() % 2001); /* 2000-4000 RPM */
+
+    if (id == 0x101)
+        return (uint16_t)(rand() % 121);         /* 0-120 km/h */
+
+    return (uint16_t)(80 + rand() % 21);         /* 80-100 C */
+}
+
+/* 0 = sent, 1 = temporary failure, -1 = fatal failure. */
+static int send_message(int sock, struct message *msg)
 {
     struct can_frame frame;
     memset(&frame, 0, sizeof(frame));
+
+    msg->value = random_value(msg->id);
 
     frame.can_id = msg->id;
     frame.can_dlc = 2;
@@ -130,15 +146,25 @@ static int send_message(int sock, const struct message *msg)
 
     ssize_t written = write(sock, &frame, sizeof(frame));
 
-    if (written == (ssize_t)sizeof(frame))
+    if (written == (ssize_t)sizeof(frame)) {
+        msg->sent++;
+
+        printf("%-8s 0x%03X#%02X%02X value=%u\n",
+               msg->name, (unsigned)msg->id,
+               (unsigned)frame.data[0], (unsigned)frame.data[1],
+               (unsigned)msg->value);
         return 0;
+    }
 
     if (written < 0 &&
         (errno == ENOBUFS || errno == EAGAIN || errno == EINTR)) {
-        fprintf(stderr, "Warning: dropped %s frame 0x%03X: %s\n",
-                msg->name, (unsigned)msg->id, strerror(errno));
+        msg->errors++;
+        fprintf(stderr, "Warning: dropped %s frame: %s\n",
+                msg->name, strerror(errno));
         return 1;
     }
+
+    msg->errors++;
 
     if (written < 0)
         perror("CAN write");
@@ -148,8 +174,32 @@ static int send_message(int sock, const struct message *msg)
     return -1;
 }
 
-int main(void)
+int main(int argc, char *argv[])
 {
+    int interval_ms = 100;
+
+    if (argc > 2) {
+        fprintf(stderr, "Usage: %s [interval_ms: 1..60000]\n", argv[0]);
+        return EXIT_FAILURE;
+    }
+
+    if (argc == 2) {
+        char *end = NULL;
+        errno = 0;
+        long parsed = strtol(argv[1], &end, 10);
+
+        if (errno != 0 || end == argv[1] || *end != '\0' ||
+            parsed < 1 || parsed > 60000) {
+            fprintf(stderr,
+                    "Interval must be an integer from 1 to 60000 ms.\n");
+            return EXIT_FAILURE;
+        }
+
+        interval_ms = (int)parsed;
+    }
+
+    srand((unsigned int)time(NULL) ^ (unsigned int)getpid());
+
     struct sigaction action;
     memset(&action, 0, sizeof(action));
     action.sa_handler = handle_signal;
@@ -166,15 +216,30 @@ int main(void)
     if (sock < 0)
         return EXIT_FAILURE;
 
-    int64_t start = now_ns() + 100 * NS_PER_MS;
+    int64_t interval_ns = (int64_t)interval_ms * NS_PER_MS;
+
+    messages[0].period_ns = interval_ns;
+    messages[1].period_ns = interval_ns;
+    messages[2].period_ns = interval_ns * 10;
+
+    int64_t start = now_ns();
+
+    if (start < 0) {
+        close(sock);
+        return EXIT_FAILURE;
+    }
+
+    start += interval_ns;
 
     for (size_t i = 0; i < NUM_MESSAGES; i++)
         messages[i].next_ns = start;
 
-    printf("CAN-Sentinel normal traffic generator\n");
-    printf("Interface: %s (virtual interface only)\n", CAN_IFACE);
-    printf("RPM: 3000 and speed: 60 km/h, target 100 ms\n");
-    printf("Coolant: 90 C, target 1000 ms\n");
+    printf("CAN-Sentinel configurable normal traffic\n");
+    printf("Virtual interface: %s\n", CAN_IFACE);
+    printf("RPM/speed interval: %d ms\n", interval_ms);
+    printf("Coolant interval: %d ms\n", interval_ms * 10);
+    printf("RPM range: 2000-4000 | Speed range: 0-120 km/h\n");
+    printf("Coolant range: 80-100 C\n");
     printf("Scheduling: CLOCK_MONOTONIC absolute deadlines\n");
     printf("Press Ctrl+C to stop.\n\n");
     fflush(stdout);
@@ -189,12 +254,25 @@ int main(void)
                 earliest = messages[i].next_ns;
         }
 
-        if (sleep_until_ns(earliest) != 0)
+        int sleep_result = sleep_until_ns(earliest);
+
+        if (sleep_result == 1)
             break;
+
+        if (sleep_result < 0) {
+            exit_code = EXIT_FAILURE;
+            break;
+        }
 
         for (size_t i = 0; i < NUM_MESSAGES; i++) {
             struct message *msg = &messages[i];
             int64_t before_send = now_ns();
+
+            if (before_send < 0) {
+                exit_code = EXIT_FAILURE;
+                stop_requested = 1;
+                break;
+            }
 
             if (before_send < msg->next_ns)
                 continue;
@@ -207,20 +285,18 @@ int main(void)
                 break;
             }
 
-            if (rc == 0)
-                msg->sent++;
-            else
-                msg->errors++;
-
-            /* Advance the original schedule, not the current time. */
+            /* Advance the original schedule rather than using "now". */
             msg->next_ns += msg->period_ns;
 
-            /*
-             * Re-read the clock after sending. If deadlines were missed,
-             * skip expired periods instead of sending catch-up bursts.
-             */
             int64_t after_send = now_ns();
 
+            if (after_send < 0) {
+                exit_code = EXIT_FAILURE;
+                stop_requested = 1;
+                break;
+            }
+
+            /* Skip missed deadlines instead of sending catch-up bursts. */
             if (msg->next_ns <= after_send) {
                 int64_t missed =
                     (after_send - msg->next_ns) / msg->period_ns + 1;
@@ -231,13 +307,12 @@ int main(void)
         }
     }
 
-    printf("\nTraffic generator stopping.\n");
+    printf("\nGenerator stopping.\n");
 
     for (size_t i = 0; i < NUM_MESSAGES; i++) {
         printf("%-8s ID 0x%03X: sent=%lu, skipped_periods=%lu, errors=%lu\n",
                messages[i].name, (unsigned)messages[i].id,
-               messages[i].sent, messages[i].skipped,
-               messages[i].errors);
+               messages[i].sent, messages[i].skipped, messages[i].errors);
     }
 
     if (close(sock) < 0) {
