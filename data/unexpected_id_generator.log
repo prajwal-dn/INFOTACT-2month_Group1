@@ -1,0 +1,11 @@
+Attack simulator: UNEXPECTED EXTENDED-ID mode
+CAN ID: 0x999 (extended), payload: DE AD, target interval: 50 ms
+Interface: vcan0 (virtual only). Press Ctrl+C to stop.
+
+Frames sent: 20 | write errors: 0
+Frames sent: 38 | write errors: 0
+Frames sent: 56 | write errors: 0
+Frames sent: 73 | write errors: 0
+
+Attack simulation stopped.
+Frames sent: 87 | write errors: 0
