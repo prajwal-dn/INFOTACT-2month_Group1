@@ -1,0 +1,117 @@
+CAN-Sentinel configurable normal traffic
+Virtual interface: vcan0
+RPM/speed interval: 100 ms
+Coolant interval: 1000 ms
+RPM range: 2000-4000 | Speed range: 0-120 km/h
+Coolant range: 80-100 C
+Scheduling: CLOCK_MONOTONIC absolute deadlines
+Press Ctrl+C to stop.
+
+RPM      0x100#0BE0 value=3040
+SPEED    0x101#006C value=108
+COOLANT  0x102#0059 value=89
+RPM      0x100#08D6 value=2262
+SPEED    0x101#001A value=26
+RPM      0x100#0B6D value=2925
+SPEED    0x101#002F value=47
+RPM      0x100#0C47 value=3143
+SPEED    0x101#0064 value=100
+RPM      0x100#0DC8 value=3528
+SPEED    0x101#003B value=59
+RPM      0x100#0EAE value=3758
+SPEED    0x101#005E value=94
+RPM      0x100#0922 value=2338
+SPEED    0x101#0058 value=88
+RPM      0x100#0EA6 value=3750
+SPEED    0x101#0058 value=88
+RPM      0x100#0A70 value=2672
+SPEED    0x101#0053 value=83
+RPM      0x100#0C49 value=3145
+SPEED    0x101#004C value=76
+RPM      0x100#0A41 value=2625
+SPEED    0x101#005D value=93
+COOLANT  0x102#0058 value=88
+RPM      0x100#0965 value=2405
+SPEED    0x101#004A value=74
+RPM      0x100#0905 value=2309
+SPEED    0x101#0015 value=21
+RPM      0x100#092A value=2346
+SPEED    0x101#0020 value=32
+RPM      0x100#0E09 value=3593
+SPEED    0x101#004F value=79
+RPM      0x100#0A21 value=2593
+SPEED    0x101#000A value=10
+RPM      0x100#0C85 value=3205
+SPEED    0x101#006C value=108
+RPM      0x100#0E21 value=3617
+SPEED    0x101#0068 value=104
+RPM      0x100#0C10 value=3088
+SPEED    0x101#0058 value=88
+RPM      0x100#090B value=2315
+SPEED    0x101#000B value=11
+RPM      0x100#0926 value=2342
+SPEED    0x101#0030 value=48
+COOLANT  0x102#005F value=95
+RPM      0x100#0D88 value=3464
+SPEED    0x101#000F value=15
+RPM      0x100#0DF1 value=3569
+SPEED    0x101#0073 value=115
+RPM      0x100#0B33 value=2867
+SPEED    0x101#0055 value=85
+RPM      0x100#0E84 value=3716
+SPEED    0x101#004E value=78
+RPM      0x100#0C28 value=3112
+SPEED    0x101#0074 value=116
+RPM      0x100#0BC3 value=3011
+SPEED    0x101#0048 value=72
+RPM      0x100#0908 value=2312
+SPEED    0x101#0026 value=38
+RPM      0x100#0A22 value=2594
+SPEED    0x101#0041 value=65
+RPM      0x100#0AA7 value=2727
+SPEED    0x101#0078 value=120
+RPM      0x100#0823 value=2083
+SPEED    0x101#0002 value=2
+COOLANT  0x102#0057 value=87
+RPM      0x100#09A7 value=2471
+SPEED    0x101#006F value=111
+RPM      0x100#0DC9 value=3529
+SPEED    0x101#0055 value=85
+RPM      0x100#0C69 value=3177
+SPEED    0x101#0019 value=25
+RPM      0x100#0C05 value=3077
+SPEED    0x101#003A value=58
+RPM      0x100#0ED5 value=3797
+SPEED    0x101#0074 value=116
+RPM      0x100#0BA6 value=2982
+SPEED    0x101#0059 value=89
+RPM      0x100#080A value=2058
+SPEED    0x101#005A value=90
+RPM      0x100#093D value=2365
+SPEED    0x101#0062 value=98
+RPM      0x100#0955 value=2389
+SPEED    0x101#0055 value=85
+RPM      0x100#0BB6 value=2998
+SPEED    0x101#0041 value=65
+COOLANT  0x102#0061 value=97
+RPM      0x100#0E6A value=3690
+SPEED    0x101#0062 value=98
+RPM      0x100#0C2C value=3116
+SPEED    0x101#0059 value=89
+RPM      0x100#0EA9 value=3753
+SPEED    0x101#002B value=43
+RPM      0x100#0EED value=3821
+SPEED    0x101#0062 value=98
+RPM      0x100#0B02 value=2818
+SPEED    0x101#0038 value=56
+RPM      0x100#0F19 value=3865
+SPEED    0x101#0042 value=66
+RPM      0x100#0E40 value=3648
+SPEED    0x101#006A value=106
+RPM      0x100#085F value=2143
+SPEED    0x101#0020 value=32
+
+Generator stopping.
+RPM      ID 0x100: sent=49, skipped_periods=0, errors=0
+SPEED    ID 0x101: sent=49, skipped_periods=0, errors=0
+COOLANT  ID 0x102: sent=5, skipped_periods=0, errors=0
