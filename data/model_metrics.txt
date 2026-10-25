@@ -1,0 +1,5 @@
+Metrics:
+Precision: 0.9677
+Recall: 1.0000
+F1: 0.9836
+TN: 11 FP: 1 FN: 0 TP: 30
