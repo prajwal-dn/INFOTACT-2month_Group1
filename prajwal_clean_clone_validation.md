@@ -60,3 +60,40 @@ and brought up separately on a new environment.
 All traffic was generated and captured on the isolated virtual
 `vcan0` interface. No physical vehicle or production CAN network
 was used.
+
+## Fresh-Clone Attack Regression Tests — 26 October 2026
+
+Both attack regression tests were executed from a separate fresh clone of the repository, using the virtual CAN interface `vcan0`.
+
+### High-Frequency Standard-ID Test
+
+- Simulator mode: 1
+- Expected CAN ID: `0x100` (standard)
+- Expected payload: `FFFF`
+- Frames captured: 977
+- Simulator-reported frames sent: 977
+- Invalid CSV rows: 0
+- Missing timestamps: 0
+- Write errors: 0
+- Result: PASS
+
+### Unexpected Extended-ID Test
+
+- Simulator mode: 2
+- Expected CAN ID: `0x999` (extended)
+- Expected payload: `DEAD`
+- Frames captured: 52
+- Simulator-reported frames sent: 52
+- Invalid CSV rows: 0
+- Missing timestamps: 0
+- Write errors: 0
+- Result: PASS
+
+### Evidence Files
+
+- `data/fresh_clone_high_frequency.csv`
+- `data/fresh_clone_high_frequency.log`
+- `data/fresh_clone_unexpected_id.csv`
+- `data/fresh_clone_unexpected_id.log`
+
+Both captures were validated with Python CSV checks. All tests were performed on `vcan0`, not on a physical vehicle network. The observed timing is subject to Linux userspace scheduling and virtual-machine overhead.
