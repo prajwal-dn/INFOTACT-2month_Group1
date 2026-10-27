@@ -7,3 +7,12 @@ data/day3_generator_output.txt
 data/day3_timing.log
 data/day3_timing_clean.log
 data/day3_timing_final.log
+
+# Local Python environment and cache
+.venv/
+__pycache__/
+*.py[cod]
+
+# Temporary experiment backups
+models/*_c05.joblib
+reports/*_c05.csv

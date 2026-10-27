@@ -1,0 +1,5 @@
+window_index,window_start_utc,window_size_ms,total_frames,unique_can_ids,extended_frame_count,unique_payload_count,max_id_share_pct,id_0x100_count,id_0x100_share_pct,id_0x101_count,id_0x101_share_pct,id_0x102_count,id_0x102_share_pct,id_0x999_count,id_0x999_share_pct,other_id_count
+0,2026-10-26T10:21:47.845736029Z,1000,422,1,0,1,100.0,422,100.0,0,0.0,0,0.0,0,0.0,0
+1,2026-10-26T10:21:48.845736029Z,1000,207,1,0,1,100.0,207,100.0,0,0.0,0,0.0,0,0.0,0
+2,2026-10-26T10:21:49.845736029Z,1000,347,1,0,1,100.0,347,100.0,0,0.0,0,0.0,0,0.0,0
+3,2026-10-26T10:21:50.845736029Z,1000,1,1,0,1,100.0,1,100.0,0,0.0,0,0.0,0,0.0,0
