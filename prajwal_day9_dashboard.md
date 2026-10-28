@@ -115,3 +115,39 @@ live inference and has not been tested on a physical vehicle network.
 The normal capture produced one anomalous window. Results from the
 two simulated attack captures are promising, but the available data
 does not establish independent real-world detection accuracy.
+
+## Update — Incremental Live Anomaly Scoring
+
+The dashboard now loads the saved Isolation Forest model when a
+capture starts and periodically scores newly completed one-second
+windows while the sniffer continues recording on `vcan0`.
+
+The dashboard:
+- Scores each completed window once during capture.
+- Leaves the newest potentially incomplete window pending.
+- Adds predictions and anomaly scores to the results table.
+- Updates summary metrics and displays a live alert for anomalous
+  windows.
+- Retains the Stop & Analyze workflow for final full-capture analysis.
+
+### Live High-Frequency Test — 28 October 2026
+
+Capture: `data/dashboard_capture_20261028T130433_588906Z.csv`
+
+- Frames captured: 14,643
+- Completed windows scored by inference: 27
+- Normal windows: 0
+- Anomalous windows: 27
+- Invalid DLC/payload rows: 0
+- Missing timestamps: 0
+
+Inference report:
+`reports/dashboard_capture_20261028T130433_588906Z_inference.csv`
+
+The dashboard displayed live alerts while capture was still running.
+The final saved-model inference also flagged all 27 completed windows.
+
+These are results from a simulated high-frequency attack on `vcan0`.
+They do not establish independently validated real-world detection
+accuracy. Continuous scoring is performed on completed one-second
+windows, not individual CAN frames.
