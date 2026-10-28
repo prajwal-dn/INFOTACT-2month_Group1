@@ -73,3 +73,45 @@ The normal baseline produced one anomalous window in the current
 experiment. The two simulated attack captures were fully flagged
 in the tested windows. These results are preliminary and are not
 independently validated real-world accuracy.
+
+## Update — Controlled vcan0 Capture Workflow
+
+The dashboard now supports a controlled capture workflow:
+1. Start the CAN sniffer on `vcan0` from the GUI.
+2. Generate traffic in a separate terminal.
+3. Stop the capture from the GUI.
+4. Run the existing saved-model inference on the captured CSV.
+5. Display window-level predictions, anomaly scores, and summary metrics.
+
+### New Dashboard Capture Results — 28 October 2026
+
+| Scenario | Frames captured | Windows scored | Normal | Anomalous |
+|---|---:|---:|---:|---:|
+| Normal traffic | 540 | 25 | 24 | 1 |
+| High-frequency attack | 16950 | 31 | 0 | 31 |
+| Unexpected extended ID | 670 | 35 | 0 | 35 |
+
+### Evidence Files
+
+Captures:
+- `data/dashboard_capture_20261028T122502_777520Z.csv`
+- `data/dashboard_capture_20261028T123001_499216Z.csv`
+- `data/dashboard_capture_20261028T123156_094587Z.csv`
+
+Inference reports:
+- `reports/dashboard_capture_20261028T122502_777520Z_inference.csv`
+- `reports/dashboard_capture_20261028T123001_499216Z_inference.csv`
+- `reports/dashboard_capture_20261028T123156_094587Z_inference.csv`
+
+All three captures passed the CSV structure and DLC/payload checks.
+Two earlier empty capture attempts were discarded.
+
+### Limitations
+
+The dashboard records traffic from the virtual CAN interface and
+analyzes it after capture stops. This is not continuous per-window
+live inference and has not been tested on a physical vehicle network.
+
+The normal capture produced one anomalous window. Results from the
+two simulated attack captures are promising, but the available data
+does not establish independent real-world detection accuracy.

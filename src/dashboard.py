@@ -2,8 +2,11 @@
 """CAN-Sentinel desktop dashboard for saved virtual-CAN captures."""
 
 import csv
+import shutil
+import signal
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal, Qt
@@ -98,6 +101,10 @@ class Dashboard(QMainWindow):
         self.setWindowTitle("CAN-Sentinel | Intrusion Detection Console")
         self.resize(1120, 760)
         self.worker = None
+        self.sniffer_process = None
+        self.capture_output_handle = None
+        self.capture_log_handle = None
+        self.active_capture_path = None
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -155,6 +162,26 @@ class Dashboard(QMainWindow):
         selection_row.addWidget(browse_button)
 
         select_layout.addLayout(selection_row)
+
+        capture_row = QHBoxLayout()
+
+        self.start_capture_button = QPushButton("●  Start vcan0 capture")
+        self.start_capture_button.clicked.connect(self.start_capture)
+        capture_row.addWidget(self.start_capture_button)
+
+        self.stop_capture_button = QPushButton("■  Stop & Analyze")
+        self.stop_capture_button.setEnabled(False)
+        self.stop_capture_button.clicked.connect(self.stop_capture_and_analyze)
+        capture_row.addWidget(self.stop_capture_button)
+
+        select_layout.addLayout(capture_row)
+
+        capture_hint = QLabel(
+            "Capture uses vcan0 only. Generate traffic in another terminal, "
+            "then select Stop & Analyze."
+        )
+        capture_hint.setObjectName("mutedText")
+        select_layout.addWidget(capture_hint)
 
         self.run_button = QPushButton("▶  Analyze capture")
         self.run_button.setObjectName("primaryButton")
@@ -349,8 +376,176 @@ class Dashboard(QMainWindow):
         if filename:
             self.path_edit.setText(filename)
 
+    def start_capture(self):
+        if self.worker is not None:
+            QMessageBox.information(
+                self, "Analysis running",
+                "Wait for the current analysis to finish before recording."
+            )
+            return
+
+        if self.sniffer_process is not None:
+            QMessageBox.warning(
+                self, "Capture active", "A capture is already running."
+            )
+            return
+
+        sniffer = ROOT / "build" / "can_sniffer"
+        if not sniffer.is_file():
+            QMessageBox.critical(
+                self, "Sniffer missing",
+                f"Build the CAN sniffer first:\n{sniffer}"
+            )
+            return
+
+        # Confirm that the virtual interface exists and is UP.
+        try:
+            check = subprocess.run(
+                ["ip", "-details", "link", "show", "vcan0"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            QMessageBox.critical(self, "Interface check failed", str(exc))
+            return
+
+        first_line = check.stdout.splitlines()[0] if check.stdout else ""
+        if check.returncode != 0 or "UP" not in first_line.split(">")[0]:
+            QMessageBox.warning(
+                self, "vcan0 unavailable",
+                "The virtual CAN interface vcan0 is not UP.\n\n"
+                "Bring it up in a terminal before recording:\n"
+                "sudo modprobe vcan\n"
+                "sudo ip link add dev vcan0 type vcan  # only if absent\n"
+                "sudo ip link set up vcan0"
+            )
+            return
+
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%fZ")
+        capture_path = ROOT / "data" / f"dashboard_capture_{stamp}.csv"
+        log_path = ROOT / "data" / f"dashboard_capture_{stamp}.log"
+        capture_path.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            output_handle = capture_path.open(
+                "w", newline="", encoding="utf-8"
+            )
+            log_handle = log_path.open(
+                "w", encoding="utf-8"
+            )
+
+            stdbuf = shutil.which("stdbuf")
+            command = (
+                [stdbuf, "-oL", str(sniffer)]
+                if stdbuf else [str(sniffer)]
+            )
+
+            process = subprocess.Popen(
+                command,
+                cwd=ROOT,
+                stdout=output_handle,
+                stderr=log_handle,
+                text=True,
+            )
+        except OSError as exc:
+            try:
+                output_handle.close()
+            except (UnboundLocalError, OSError):
+                pass
+            try:
+                log_handle.close()
+            except (UnboundLocalError, OSError):
+                pass
+            QMessageBox.critical(
+                self, "Capture failed",
+                f"Could not start the CAN sniffer:\n{exc}"
+            )
+            return
+
+        self.capture_output_handle = output_handle
+        self.capture_log_handle = log_handle
+        self.sniffer_process = process
+        self.active_capture_path = capture_path
+
+        self.start_capture_button.setEnabled(False)
+        self.stop_capture_button.setEnabled(True)
+        self.run_button.setEnabled(False)
+        self.status_label.setText("● CAPTURING vcan0")
+        self.status_label.setObjectName("statusBusy")
+        self.status_label.style().unpolish(self.status_label)
+        self.status_label.style().polish(self.status_label)
+        self.footer.setText(
+            f"Recording to {capture_path.name}. Generate traffic on vcan0 "
+            "from another terminal, then click Stop & Analyze."
+        )
+
+    def stop_capture_and_analyze(self):
+        process = self.sniffer_process
+        if process is None:
+            return
+
+        capture_path = self.active_capture_path
+        self.stop_capture_button.setEnabled(False)
+        self.status_label.setText("● STOPPING CAPTURE")
+        self.status_label.setObjectName("statusBusy")
+        self.status_label.style().unpolish(self.status_label)
+        self.status_label.style().polish(self.status_label)
+
+        try:
+            if process.poll() is None:
+                process.send_signal(signal.SIGTERM)
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=3)
+        except OSError as exc:
+            QMessageBox.warning(
+                self, "Stop warning",
+                f"Could not stop the sniffer cleanly:\n{exc}"
+            )
+        finally:
+            for handle in (
+                self.capture_output_handle,
+                self.capture_log_handle,
+            ):
+                if handle is not None:
+                    handle.close()
+
+            self.sniffer_process = None
+            self.capture_output_handle = None
+            self.capture_log_handle = None
+            self.active_capture_path = None
+
+        self.start_capture_button.setEnabled(True)
+        self.run_button.setEnabled(True)
+
+        if capture_path is None or not capture_path.is_file():
+            self.status_label.setText("● ERROR")
+            self.footer.setText("No capture file was produced.")
+            return
+
+        self.path_edit.setText(str(capture_path))
+        self.capture_combo.setCurrentIndex(-1)
+        self.footer.setText(
+            f"Capture saved: {capture_path.name}. Starting analysis…"
+        )
+
+        # Reuse the existing inference workflow on the new capture.
+        self.run_inference()
+
     def run_inference(self):
         if self.worker is not None:
+            return
+        if (
+            self.sniffer_process is not None
+            and self.sniffer_process.poll() is None
+        ):
+            QMessageBox.warning(
+                self, "Capture active",
+                "Stop the current capture before analyzing a file."
+            )
             return
 
         capture = self.path_edit.text().strip()
