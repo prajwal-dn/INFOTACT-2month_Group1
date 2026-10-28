@@ -108,9 +108,7 @@ Two earlier empty capture attempts were discarded.
 
 ### Limitations
 
-The dashboard records traffic from the virtual CAN interface and
-analyzes it after capture stops. This is not continuous per-window
-live inference and has not been tested on a physical vehicle network.
+The dashboard records traffic from virtual `vcan0`. It now performs incremental anomaly scoring on completed one-second windows while capture continues. The **Stop & Analyze** workflow also performs final inference after capture ends. This prototype has been tested with virtual-CAN captures only and has not been validated on a physical vehicle network.
 
 The normal capture produced one anomalous window. Results from the
 two simulated attack captures are promising, but the available data
@@ -151,3 +149,19 @@ These are results from a simulated high-frequency attack on `vcan0`.
 They do not establish independently validated real-world detection
 accuracy. Continuous scoring is performed on completed one-second
 windows, not individual CAN frames.
+
+## Day 10 — Normal baseline anomaly review
+
+The saved-model report `reports/normal_baseline_60s_inference.csv`
+scored 59 windows: 58 were classified as NORMAL and one as ANOMALY.
+Window 18 had an anomaly score of 0.71522442 and contained 19 frames:
+10 with ID `0x100`, 9 with ID `0x101`, no extended frames, and 19
+unique payloads. Neighboring windows 17 and 19 were classified as
+NORMAL.
+
+This is an unresolved anomaly in a normal-baseline capture. The evidence
+does not establish whether it is a false positive or unusual but valid
+traffic. Inspect the raw frames for window 18 and collect additional
+normal captures before drawing conclusions about false-positive rates.
+These results are preliminary and do not establish real-world detection
+accuracy.

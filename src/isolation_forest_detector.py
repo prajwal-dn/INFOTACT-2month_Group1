@@ -123,7 +123,7 @@ def main():
         "--unexpected-id",
         default="reports/unexpected_id_capture_window_features.csv",
     )
-    parser.add_argument("--contamination", type=float, default=0.05)
+    parser.add_argument("--contamination", type=float, default=0.02)
     args = parser.parse_args()
 
     if not 0.0 < args.contamination <= 0.5:

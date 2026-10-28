@@ -238,7 +238,51 @@ median was 52.344 ms.
 See `prajwal_day5_regression.md` and the corresponding files in `data/`
 for details.
 
-## 8. Limitations
+## 8. Saved-Model Inference and Live Dashboard
+
+### Run inference on a saved capture
+
+Activate the virtual environment and analyze a recorded virtual-CAN capture.
+Run these commands from the repository root:
+
+    source .venv/bin/activate
+    python src/score_capture.py data/normal_baseline_60s.csv
+
+The default report is written to
+`reports/normal_baseline_60s_inference.csv`. It contains per-window
+predictions, anomaly scores and feature values.
+
+Inference loads `models/isolation_forest_baseline.joblib` without
+retraining. The model uses 1,000 ms windows and may exclude a potentially
+incomplete final window. Only virtual-CAN captures from `vcan0` are accepted.
+
+### Launch the desktop dashboard
+
+    source .venv/bin/activate
+    python src/dashboard.py
+
+The dashboard supports capture presets, browsing for a CSV, analyzing
+saved captures and starting a capture on virtual `vcan0`.
+
+While capture is running, completed one-second windows are incrementally
+scored with the saved model. Results and summary metrics are updated, and
+an alert is displayed when a window is classified as anomalous. The newest
+potentially incomplete window remains pending. Use **Stop & Analyze** to
+finish capture and perform final inference.
+
+### Run the regression checks
+
+Run the following from the repository root:
+
+    python tests/validate_captures.py
+    python tests/test_score_capture.py
+    QT_QPA_PLATFORM=offscreen python tests/test_dashboard_smoke.py
+    python -m compileall -q src tests
+
+Passing these tests does not establish independently validated real-world
+detection accuracy.
+
+## 9. Limitations
 
 The target sending intervals are not exact timing guarantees. Virtual
 machine scheduling and user-space capture timing can cause delays and
@@ -248,13 +292,13 @@ Successful frame capture and CSV validation do not, by themselves,
 prove that a machine-learning detector accurately classifies attacks.
 Detection metrics and dashboard integration must be measured separately.
 
-## 9. Safety
+## 10. Safety
 
 This project uses simulated traffic on the isolated virtual `vcan0`
 interface. Never run attack simulations against a physical vehicle,
 live automotive bus or network without explicit authorization.
 
-## 10. Contributor Workflow
+## 11. Contributor Workflow
 
 Prajwal's working branch is `prajwal`. Commit meaningful source code,
 tests, documentation and evidence to the assigned branch. Do not merge
