@@ -1,0 +1,4 @@
+CAN-Sentinel sniffer listening on vcan0 (virtual interface only).
+Press Ctrl+C to stop capture.
+
+Capture stopped. Frames captured: 1260
