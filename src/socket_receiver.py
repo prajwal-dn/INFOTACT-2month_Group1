@@ -109,13 +109,13 @@ def run_receiver(expected_count):
         server.listen(1)
 
         print(f"Listening on {SOCKET_PATH}")
-        print("Waiting for C sample producer...")
+        print("Waiting for C producer...")
 
         accepted = 0
         with server.accept()[0] as connection:
             buffer = b""
 
-            while accepted < expected_count:
+            while expected_count == 0 or accepted < expected_count:
                 chunk = connection.recv(4096)
 
                 if not chunk:
@@ -125,7 +125,7 @@ def run_receiver(expected_count):
 
                 buffer += chunk
 
-                while b"\n" in buffer and accepted < expected_count:
+                while b"\n" in buffer and (expected_count == 0 or accepted < expected_count):
                     raw_line, buffer = buffer.split(b"\n", 1)
 
                     if not raw_line:
@@ -142,7 +142,7 @@ def run_receiver(expected_count):
                         f"timestamp={event['timestamp_utc']}"
                     )
 
-            if accepted != expected_count:
+            if expected_count > 0 and accepted != expected_count:
                 raise RuntimeError(
                     f"Expected {expected_count} events, received {accepted}"
                 )
@@ -159,7 +159,7 @@ if __name__ == "__main__":
     parser.add_argument("--count", type=int, default=2)
     args = parser.parse_args()
 
-    if args.count < 1:
-        parser.error("--count must be at least 1")
+    if args.count < 0:
+        parser.error("--count must be 0 (unlimited) or a positive integer")
 
     run_receiver(args.count)
