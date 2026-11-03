@@ -17,3 +17,10 @@ __pycache__/
 models/*_c05.joblib
 reports/*_c05.csv
 reports/dashboard_inference_latest.csv
+
+# Generated CAN dashboard captures
+data/dashboard_capture_*.csv
+data/dashboard_capture_*.log
+
+# Generated inference reports
+reports/*_inference.csv
