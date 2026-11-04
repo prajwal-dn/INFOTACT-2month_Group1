@@ -1,0 +1,16 @@
+// FastAPI route table. Keep in sync with docs/api-contract.md.
+export const endpoints = {
+  status: () => "/api/status",
+  presets: () => "/api/presets",
+  analyses: () => "/api/analyses",
+  analysis: (id: string) => `/api/analyses/${encodeURIComponent(id)}`,
+  upload: () => "/api/analyses/upload",
+  report: (id: string) => `/api/analyses/${encodeURIComponent(id)}/report.csv`,
+  liveStart: () => "/api/live/start",
+  live: (id: string) => `/api/live/${encodeURIComponent(id)}`,
+  liveStop: (id: string) => `/api/live/${encodeURIComponent(id)}/stop`,
+} as const;
+
+export function joinUrl(baseUrl: string, path: string) {
+  return `${baseUrl.replace(/\/+$/, "")}${path}`;
+}

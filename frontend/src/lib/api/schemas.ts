@@ -1,0 +1,138 @@
+// Data models shared with the Python backend (future FastAPI service).
+// Field names mirror the backend's CSV/report columns (score_capture.py,
+// frequency_analyzer.py) so the API can serialise them without renaming.
+import { z } from "zod";
+
+export const FEATURE_COLUMNS = [
+  "total_frames",
+  "unique_can_ids",
+  "extended_frame_count",
+  "unique_payload_count",
+  "max_id_share_pct",
+  "id_0x100_count",
+  "id_0x100_share_pct",
+  "id_0x101_count",
+  "id_0x101_share_pct",
+  "id_0x102_count",
+  "id_0x102_share_pct",
+  "id_0x999_count",
+  "id_0x999_share_pct",
+  "other_id_count",
+] as const;
+
+export type FeatureColumn = (typeof FEATURE_COLUMNS)[number];
+
+export const DataSource = z.enum(["demo", "backend"]);
+export type DataSource = z.infer<typeof DataSource>;
+
+export const Prediction = z.enum(["NORMAL", "ANOMALY"]);
+export type Prediction = z.infer<typeof Prediction>;
+
+export const WindowFeatures = z.object(
+  Object.fromEntries(FEATURE_COLUMNS.map((c) => [c, z.number()])) as Record<FeatureColumn, z.ZodNumber>,
+);
+export type WindowFeatures = z.infer<typeof WindowFeatures>;
+
+/** One scored 1-second window (a row of reports/<capture>_inference.csv). */
+export const InferenceWindow = z.object({
+  window_index: z.number().int(),
+  window_start_utc: z.string(),
+  prediction: Prediction,
+  /** Higher means more unusual to the model (= -score_samples). */
+  anomaly_score: z.number(),
+  features: WindowFeatures,
+});
+export type InferenceWindow = z.infer<typeof InferenceWindow>;
+
+/** Per-ID row from frequency_analyzer.build_frequency_summary. */
+export const FrequencyRow = z.object({
+  can_id: z.string(),
+  frame_format: z.string(),
+  frame_count: z.number(),
+  percentage_of_total: z.number(),
+  unique_payload_count: z.number(),
+  mean_interarrival_ms: z.number().nullable(),
+  median_interarrival_ms: z.number().nullable(),
+  min_interarrival_ms: z.number().nullable(),
+  max_interarrival_ms: z.number().nullable(),
+});
+export type FrequencyRow = z.infer<typeof FrequencyRow>;
+
+export const ModelInfo = z.object({
+  loaded: z.boolean(),
+  path: z.string(),
+  algorithm: z.string(),
+  contamination: z.number().nullable(),
+  training_windows: z.number().nullable(),
+  window_ms: z.number(),
+  feature_columns: z.array(z.string()),
+  sklearn_version: z.string().nullable(),
+});
+export type ModelInfo = z.infer<typeof ModelInfo>;
+
+export const SystemStatus = z.object({
+  data_source: DataSource,
+  backend_version: z.string(),
+  interface: z.object({
+    name: z.string(),
+    state: z.enum(["UP", "DOWN", "MISSING", "UNKNOWN"]),
+  }),
+  sniffer: z.object({ built: z.boolean(), path: z.string() }),
+  model: ModelInfo,
+  checked_at: z.string(),
+});
+export type SystemStatus = z.infer<typeof SystemStatus>;
+
+export const CapturePreset = z.object({
+  id: z.string(),
+  label: z.string(),
+  path: z.string(),
+  available: z.boolean(),
+});
+export type CapturePreset = z.infer<typeof CapturePreset>;
+
+export const AnalysisOrigin = z.enum(["preset", "path", "upload", "live"]);
+
+export const AnalysisSummary = z.object({
+  id: z.string(),
+  data_source: DataSource,
+  capture_file: z.string(),
+  origin: AnalysisOrigin,
+  created_at: z.string(),
+  frames_loaded: z.number(),
+  windows_scored: z.number(),
+  normal_count: z.number(),
+  anomaly_count: z.number(),
+});
+export type AnalysisSummary = z.infer<typeof AnalysisSummary>;
+
+export const AnalysisResult = AnalysisSummary.extend({
+  /** Index of the possibly-incomplete final window the backend excluded. */
+  excluded_partial_window: z.number().nullable(),
+  model: ModelInfo,
+  windows: z.array(InferenceWindow),
+  frequency_summary: z.array(FrequencyRow),
+  notes: z.array(z.string()),
+});
+export type AnalysisResult = z.infer<typeof AnalysisResult>;
+
+export const LiveState = z.enum(["capturing", "stopping", "stopped", "error"]);
+export type LiveState = z.infer<typeof LiveState>;
+
+export const LiveSession = z.object({
+  id: z.string(),
+  data_source: DataSource,
+  state: LiveState,
+  interface: z.string(),
+  capture_file: z.string(),
+  started_at: z.string(),
+  frames_captured: z.number(),
+  /** Completed windows scored incrementally by the saved model. */
+  windows: z.array(InferenceWindow),
+  /** Newest, possibly incomplete window that is not scored yet. */
+  pending_window_index: z.number().nullable(),
+  message: z.string().nullable(),
+});
+export type LiveSession = z.infer<typeof LiveSession>;
+
+export const ApiErrorBody = z.object({ detail: z.union([z.string(), z.array(z.unknown())]) });
