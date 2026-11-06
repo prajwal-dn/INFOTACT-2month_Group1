@@ -1,3 +1,4 @@
+import { EcuImpactMap } from "@/components/app/EcuImpactMap";
 import { BusActivityWave } from "@/components/app/BusActivityWave";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowLeft, Download, Info, Loader2 } from "lucide-react";
@@ -67,6 +68,123 @@ function AnalysisDetail() {
       )}
 
       <MetricGrid metrics={metricsOf(a)} />
+      <EcuImpactMap incidents={a.incidents ?? []} />
+      {/* Sentinel X — Incident Center */}
+<section className="space-y-4 rounded-xl border bg-card p-5">
+  <div className="flex flex-wrap items-center justify-between gap-3">
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        Sentinel X
+      </p>
+      <h2 className="text-xl font-semibold">Incident Center</h2>
+      <p className="text-sm text-muted-foreground">
+        Correlated anomalous CAN traffic windows
+      </p>
+    </div>
+
+    <span className="rounded-lg border bg-secondary px-3 py-2 text-sm font-medium">
+      {(a.incidents ?? []).length} incidents
+    </span>
+  </div>
+
+  {(a.incidents ?? []).length === 0 ? (
+    <div className="rounded-lg border border-dashed p-6 text-center">
+      <p className="font-medium">No correlated incidents</p>
+      <p className="mt-1 text-sm text-muted-foreground">
+        No consecutive anomalous windows were grouped in this analysis.
+      </p>
+    </div>
+  ) : (
+    <div className="space-y-3">
+      {(a.incidents ?? []).map((incident) => (
+        <article
+          key={incident.incident_id}
+          className="space-y-3 rounded-lg border p-4"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="font-mono text-sm font-semibold">
+                {incident.incident_id}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {incident.status}
+              </p>
+            </div>
+
+            <span
+              className={`rounded-md border px-2.5 py-1 text-xs font-bold ${
+                incident.severity === "HIGH"
+                  ? "border-destructive/40 bg-destructive/10 text-destructive"
+                  : incident.severity === "MEDIUM"
+                    ? "border-orange-500/40 bg-orange-500/10 text-orange-600"
+                    : "border-muted bg-secondary text-muted-foreground"
+              }`}
+            >
+              {incident.severity}
+            </span>
+          </div>
+
+          <p className="text-sm">{incident.summary}</p>
+
+          <div className="grid gap-3 text-sm sm:grid-cols-3">
+            <div>
+              <p className="text-xs text-muted-foreground">Windows</p>
+              <p className="font-mono">
+                {incident.start_window} – {incident.end_window}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-xs text-muted-foreground">Window count</p>
+              <p className="font-mono">{incident.window_count}</p>
+            </div>
+
+            <div>
+              <p className="text-xs text-muted-foreground">Affected CAN IDs</p>
+              <div className="flex flex-wrap gap-1">
+                {incident.affected_can_ids.length ? (
+                  incident.affected_can_ids.map((id) => (
+                    <span
+                      key={id}
+                      className="rounded border bg-secondary px-2 py-0.5 font-mono text-xs"
+                    >
+                      {id}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-muted-foreground">Not identified</span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {incident.reasons.length > 0 && (
+            <div className="border-t pt-3">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Evidence
+              </p>
+
+              <ul className="space-y-2">
+                {incident.reasons.map((reason, index) => (
+                  <li key={`${reason.code}-${index}`} className="text-sm">
+                    <span className="font-medium">{reason.code}</span>
+                    <p className="text-muted-foreground">{reason.message}</p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <p className="text-xs text-muted-foreground">
+            {incident.window_count} correlated windows. Heuristic evidence
+            indicates unusual traffic patterns; it does not prove vehicle
+            compromise.
+          </p>
+        </article>
+      ))}
+    </div>
+  )}
+</section>
 
       <BusActivityWave
         source={{ kind: "analysis", windows: a.windows, excludedPartialWindow: a.excluded_partial_window, dataSource: a.data_source, label: "Saved analysis" }}

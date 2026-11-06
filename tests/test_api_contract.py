@@ -244,3 +244,25 @@ def test_live_session_flow_mock_direct(client):
     assert final_res["data_source"] == "backend"
     assert "windows" in final_res
     assert "frequency_summary" in final_res
+
+
+def test_analysis_includes_incident_list(client):
+    """Analysis responses expose correlated incidents."""
+    response = client.post("/api/analyses", json={
+        "capture_path": "data/fresh_clone_high_frequency.csv",
+        "origin": "preset",
+    })
+
+    assert response.status_code == 200
+    data = response.json()
+
+    assert "incidents" in data
+    assert isinstance(data["incidents"], list)
+
+    for incident in data["incidents"]:
+        assert incident["incident_id"].startswith("INC-")
+        assert incident["severity"] in ("HIGH", "MEDIUM", "REVIEW")
+        assert incident["window_count"] >= 1
+        assert incident["start_window"] <= incident["end_window"]
+        assert isinstance(incident["reasons"], list)
+        assert isinstance(incident["affected_can_ids"], list)

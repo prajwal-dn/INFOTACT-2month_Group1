@@ -33,6 +33,22 @@ export const WindowFeatures = z.object(
 );
 export type WindowFeatures = z.infer<typeof WindowFeatures>;
 
+/** Evidence-based explanation attached to an anomalous window. */
+export const AlertReason = z.object({
+  code: z.string(),
+  message: z.string(),
+  evidence: z.record(z.string(), z.unknown()),
+});
+
+export const AlertExplanation = z.object({
+  reasons: z.array(AlertReason),
+  severity: z.enum(["INFO", "MEDIUM", "HIGH", "REVIEW"]),
+  summary: z.string(),
+});
+
+export type AlertReason = z.infer<typeof AlertReason>;
+export type AlertExplanation = z.infer<typeof AlertExplanation>;
+
 /** One scored 1-second window (a row of reports/<capture>_inference.csv). */
 export const InferenceWindow = z.object({
   window_index: z.number().int(),
@@ -41,8 +57,26 @@ export const InferenceWindow = z.object({
   /** Higher means more unusual to the model (= -score_samples). */
   anomaly_score: z.number(),
   features: WindowFeatures,
+  explanation: AlertExplanation.optional(),
 });
 export type InferenceWindow = z.infer<typeof InferenceWindow>;
+/** A group of correlated anomalous CAN windows. */
+export const Incident = z.object({
+  incident_id: z.string(),
+  severity: z.enum(["HIGH", "MEDIUM", "REVIEW"]),
+  status: z.string(),
+  start_window: z.number().int(),
+  end_window: z.number().int(),
+  window_count: z.number().int(),
+  start_time_utc: z.string(),
+  end_time_utc: z.string(),
+  affected_can_ids: z.array(z.string()),
+  reasons: z.array(AlertReason),
+  windows: z.array(InferenceWindow),
+  summary: z.string(),
+});
+
+export type Incident = z.infer<typeof Incident>;
 
 /** Per-ID row from frequency_analyzer.build_frequency_summary. */
 export const FrequencyRow = z.object({
@@ -111,6 +145,7 @@ export const AnalysisResult = AnalysisSummary.extend({
   excluded_partial_window: z.number().nullable(),
   model: ModelInfo,
   windows: z.array(InferenceWindow),
+  incidents: z.array(Incident).optional(),
   frequency_summary: z.array(FrequencyRow),
   notes: z.array(z.string()),
 });

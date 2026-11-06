@@ -24,3 +24,7 @@ data/dashboard_capture_*.log
 
 # Generated inference reports
 reports/*_inference.csv
+
+# Runtime-generated live CAN captures and uploads
+data/live_capture_*.csv
+data/uploads/

@@ -78,6 +78,61 @@ export function DetectionTable({ windows, newestFirst = false, maxHeight = 520 }
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">Higher means more unusual to the saved Isolation Forest model.</p>
               </div>
+              {selected.prediction === "ANOMALY" && (
+                <section className="mt-6 rounded-xl border border-destructive/30 bg-destructive/[0.04] p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="eyebrow">Alert explanation</div>
+                    {selected.explanation && (
+                      <span className="rounded-md border px-2 py-1 font-mono text-[0.65rem] font-semibold">
+                        {selected.explanation.severity}
+                      </span>
+                    )}
+                  </div>
+
+                  {selected.explanation ? (
+                    <>
+                      <p className="mt-2 text-sm leading-relaxed">
+                        {selected.explanation.summary}
+                      </p>
+
+                      {selected.explanation.reasons.length > 0 ? (
+                        <ul className="mt-3 space-y-3">
+                          {selected.explanation.reasons.map((reason) => (
+                            <li key={reason.code} className="border-t pt-3">
+                              <div className="font-mono text-xs font-semibold">
+                                {reason.code}
+                              </div>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {reason.message}
+                              </p>
+                              <dl className="mt-2 space-y-1">
+                                {Object.entries(reason.evidence).map(([key, value]) => (
+                                  <div key={key} className="flex justify-between gap-3 font-mono text-[0.68rem]">
+                                    <dt className="text-muted-foreground">{key}</dt>
+                                    <dd>{String(value)}</dd>
+                                  </div>
+                                ))}
+                              </dl>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          No specific explanation rule matched this anomaly.
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Explanation unavailable for this demo or older result.
+                    </p>
+                  )}
+                  <p className="mt-3 text-[0.68rem] text-muted-foreground">
+                    Heuristic evidence only; an anomaly does not prove vehicle compromise.
+                  </p>
+                </section>
+              )}
+
               <div className="eyebrow mb-2 mt-6">Model feature vector</div>
               <dl className="divide-y rounded-xl border">
                 {FEATURE_COLUMNS.map((c) => (

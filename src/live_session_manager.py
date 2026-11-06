@@ -26,6 +26,11 @@ from typing import Any, Dict, List, Optional, Tuple
 import joblib
 
 if __package__:
+    from .alert_explainer import explain_window
+else:
+    from alert_explainer import explain_window
+
+if __package__:
     from .api_analysis_service import (
         ApiAnalysisService,
         DEFAULT_MODEL_PATH,
@@ -500,6 +505,7 @@ class LiveSessionManager:
             "prediction": label,
             "anomaly_score": anom_score,
             "features": feats,
+            "explanation": explain_window(feats, label),
         })
 
     def stop_session(self, session_id: str) -> Dict[str, Any]:
