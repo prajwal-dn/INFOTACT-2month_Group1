@@ -5,6 +5,9 @@ import { z } from "zod";
 import { ApiError, type ApiClient } from "./client";
 import { endpoints, joinUrl } from "./endpoints";
 import {
+  ResponsePlan,
+  ResponseActivation,
+  RecoveryVerification,
   AnalysisResult,
   AnalysisSummary,
   ApiErrorBody,
@@ -88,5 +91,14 @@ export function createHttpClient(baseUrl: string, fetchImpl: typeof fetch = fetc
     startLiveCapture: () => json(LiveSession, endpoints.liveStart(), post()),
     getLiveSession: (id) => json(LiveSession, endpoints.live(id)),
     stopLiveCapture: (id) => json(AnalysisResult, endpoints.liveStop(id), post()),
-  };
+    planResponse: (analysisId, incidentId) =>
+    json(ResponsePlan, endpoints.responsePlan(analysisId, incidentId), post()),
+
+    activateResponse: (analysisId, incidentId) =>
+    json(ResponseActivation, endpoints.responseActivate(analysisId, incidentId), post()),
+
+    verifyRecovery: (analysisId, incidentId) =>
+    json(RecoveryVerification, endpoints.responseVerify(analysisId, incidentId), post()),
+
+};
 }

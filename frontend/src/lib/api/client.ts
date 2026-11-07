@@ -1,6 +1,9 @@
 // The single seam between the UI and the CAN-Sentinel backend.
 import type {
-  AnalysisResult,
+ ResponsePlan,
+ ResponseActivation,
+ RecoveryVerification,
+ AnalysisResult,
   AnalysisSummary,
   CapturePreset,
   LiveSession,
@@ -25,6 +28,12 @@ export interface ApiClient {
   getLiveSession(id: string): Promise<LiveSession>;
   /** Stop capture and run final inference ("Stop & Analyze"). */
   stopLiveCapture(id: string): Promise<AnalysisResult>;
+  planResponse(analysisId: string, incidentId: string): Promise<ResponsePlan>;
+
+  activateResponse(analysisId: string, incidentId: string): Promise<ResponseActivation>;
+
+  verifyRecovery(analysisId: string, incidentId: string): Promise<RecoveryVerification>;
+
 }
 
 export class ApiError extends Error {

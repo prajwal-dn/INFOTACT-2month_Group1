@@ -69,3 +69,65 @@ def test_three_consecutive_anomalies_are_high_severity():
 
     assert incidents[0]["severity"] == "HIGH"
     assert incidents[0]["window_count"] == 3
+
+
+def test_incident_aggregates_can_id_counts():
+    windows = [
+        make_window(1, "ANOMALY"),
+        make_window(2, "ANOMALY"),
+    ]
+
+    windows[0]["response_evidence"] = {
+        "can_id_counts": {"0x100": 10, "0x555": 5},
+        "unexpected_can_ids": ["0x555"],
+    }
+    windows[1]["response_evidence"] = {
+        "can_id_counts": {"0x100": 10, "0x555": 15},
+        "unexpected_can_ids": ["0x555"],
+    }
+
+    incident = correlate_incidents(windows)[0]
+    evidence = incident["response_evidence"]
+
+    assert evidence["can_id_counts"] == {
+        "0x100": 20,
+        "0x555": 20,
+    }
+    assert evidence["unexpected_can_ids"] == ["0x555"]
+
+
+def test_incident_calculates_dominant_id_and_share():
+    window = make_window(1, "ANOMALY")
+    window["response_evidence"] = {
+        "can_id_counts": {"0x100": 20, "0x555": 80},
+        "unexpected_can_ids": ["0x555"],
+    }
+
+    evidence = correlate_incidents([window])[0]["response_evidence"]
+
+    assert evidence["dominant_can_id"] == "0x555"
+    assert evidence["dominant_can_id_share_pct"] == 80.0
+
+
+def test_known_999_is_not_unexpected():
+    window = make_window(1, "ANOMALY")
+    window["response_evidence"] = {
+        "can_id_counts": {"0x999": 100},
+        "unexpected_can_ids": [],
+    }
+
+    evidence = correlate_incidents([window])[0]["response_evidence"]
+
+    assert evidence["unexpected_can_ids"] == []
+    assert evidence["dominant_can_id"] == "0x999"
+
+
+def test_missing_response_evidence_is_safe():
+    window = make_window(1, "ANOMALY")
+
+    evidence = correlate_incidents([window])[0]["response_evidence"]
+
+    assert evidence["can_id_counts"] == {}
+    assert evidence["unexpected_can_ids"] == []
+    assert evidence["dominant_can_id"] is None
+    assert evidence["dominant_can_id_share_pct"] == 0.0

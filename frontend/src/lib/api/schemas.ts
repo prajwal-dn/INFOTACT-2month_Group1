@@ -50,14 +50,21 @@ export type AlertReason = z.infer<typeof AlertReason>;
 export type AlertExplanation = z.infer<typeof AlertExplanation>;
 
 /** One scored 1-second window (a row of reports/<capture>_inference.csv). */
+export const ResponseEvidence = z.object({
+  can_id_counts: z.record(z.string(), z.number().int()),
+  unexpected_can_ids: z.array(z.string()),
+  dominant_can_id: z.string().nullable(),
+  dominant_can_id_share_pct: z.number(),
+});
+
 export const InferenceWindow = z.object({
   window_index: z.number().int(),
   window_start_utc: z.string(),
   prediction: Prediction,
-  /** Higher means more unusual to the model (= -score_samples). */
   anomaly_score: z.number(),
   features: WindowFeatures,
   explanation: AlertExplanation.optional(),
+  response_evidence: ResponseEvidence.optional(),
 });
 export type InferenceWindow = z.infer<typeof InferenceWindow>;
 /** A group of correlated anomalous CAN windows. */
@@ -71,6 +78,7 @@ export const Incident = z.object({
   start_time_utc: z.string(),
   end_time_utc: z.string(),
   affected_can_ids: z.array(z.string()),
+  response_evidence: ResponseEvidence.optional(),
   reasons: z.array(AlertReason),
   windows: z.array(InferenceWindow),
   summary: z.string(),
@@ -78,6 +86,64 @@ export const Incident = z.object({
 
 export type Incident = z.infer<typeof Incident>;
 
+export const ResponsePlan = z.object({
+  incident_id: z.string(),
+  classification: z.string(),
+  action: z.enum([
+    "SIMULATED_RATE_LIMIT",
+    "SIMULATED_ID_QUARANTINE",
+    "MANUAL_REVIEW",
+  ]),
+  description: z.string(),
+  target_can_ids: z.array(z.string()),
+  status: z.string(),
+  mode: z.literal("SIMULATION"),
+});
+
+export type ResponsePlan = z.infer<typeof ResponsePlan>;
+
+export const ReplayResult = z.object({
+  mode: z.literal("OFFLINE_SIMULATION"),
+  action: z.string(),
+  before: z.object({
+    total_frames: z.number(),
+    frames_by_can_id: z.record(z.string(), z.number()),
+    unique_can_ids: z.number(),
+  }),
+  after: z.object({
+    total_frames: z.number(),
+    frames_by_can_id: z.record(z.string(), z.number()),
+    unique_can_ids: z.number(),
+  }),
+  removed_frames: z.number(),
+  removed_can_ids: z.record(z.string(), z.number()),
+  original_preserved: z.boolean(),
+});
+
+export type ReplayResult = z.infer<typeof ReplayResult>;
+
+export const ResponseActivation = z.object({
+  incident_id: z.string(),
+  classification: z.string(),
+  action: z.string(),
+  description: z.string(),
+  target_can_ids: z.array(z.string()),
+  status: z.string(),
+  mode: z.literal("SIMULATION"),
+  replay_result: ReplayResult.optional(),
+});
+
+export type ResponseActivation = z.infer<typeof ResponseActivation>;
+export const RecoveryVerification = ResponseActivation.extend({
+  recovery: z.object({
+    verified: z.boolean(),
+    baseline_frame_rate: z.number(),
+    post_mitigation_frame_rate: z.number(),
+    remaining_unexpected_ids: z.number().int(),
+  }),
+});
+
+export type RecoveryVerification = z.infer<typeof RecoveryVerification>;
 /** Per-ID row from frequency_analyzer.build_frequency_summary. */
 export const FrequencyRow = z.object({
   can_id: z.string(),

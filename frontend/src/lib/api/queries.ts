@@ -95,6 +95,33 @@ export function useDownloadReport() {
   });
 }
 
+
+export function usePlanResponse() {
+  const { client } = useApi();
+
+  return useMutation({
+    mutationFn: (input: { analysisId: string; incidentId: string }) =>
+      client.planResponse(input.analysisId, input.incidentId),
+  });
+}
+
+export function useActivateResponse() {
+  const { client } = useApi();
+
+  return useMutation({
+    mutationFn: (input: { analysisId: string; incidentId: string }) =>
+      client.activateResponse(input.analysisId, input.incidentId),
+  });
+}
+
+export function useVerifyRecovery() {
+  const { client } = useApi();
+
+  return useMutation({
+    mutationFn: (input: { analysisId: string; incidentId: string }) =>
+      client.verifyRecovery(input.analysisId, input.incidentId),
+  });
+}
 export function metricsOf(a: { windows_scored: number; anomaly_count: number; normal_count: number } | undefined) {
   if (!a) return null;
   return {

@@ -3,7 +3,15 @@ import { BusActivityWave } from "@/components/app/BusActivityWave";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowLeft, Download, Info, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-
+import {
+  metricsOf,
+  useAnalysis,
+  useDownloadReport,
+  usePlanResponse,
+  useActivateResponse,
+  useVerifyRecovery,
+} from "@/lib/api/queries";
+import { useApi } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DemoBadge } from "@/components/app/DemoNotice";
@@ -11,7 +19,6 @@ import { DetectionTable, FrequencyTable } from "@/components/app/DetectionTable"
 import { MetricGrid } from "@/components/app/MetricGrid";
 import { EmptyState, ErrorState, fmtTime, PageHeader, Panel } from "@/components/app/primitives";
 import { ThreatChart } from "@/components/app/ThreatChart";
-import { metricsOf, useAnalysis, useDownloadReport } from "@/lib/api/queries";
 import { pageHead } from "@/lib/head";
 
 export const Route = createFileRoute("/analyses/$analysisId")({
@@ -24,7 +31,8 @@ function AnalysisDetail() {
   const q = useAnalysis(analysisId);
   const report = useDownloadReport();
   const a = q.data;
-
+  const { config } = useApi();
+  const demoMode = config.mode === "demo";
   if (q.isError)
     return (
       <div className="space-y-4">
@@ -180,6 +188,11 @@ function AnalysisDetail() {
             indicates unusual traffic patterns; it does not prove vehicle
             compromise.
           </p>
+        <IncidentResponseControls
+        analysisId={analysisId}
+        incidentId={incident.incident_id}
+        demoMode={demoMode}
+         />
         </article>
       ))}
     </div>
@@ -253,5 +266,132 @@ function BackLink() {
     <Link to="/analyses" className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
       <ArrowLeft className="size-3.5" /> All analyses
     </Link>
+    );
+}
+function IncidentResponseControls({
+  analysisId,
+  incidentId,
+  demoMode,
+}: {
+  analysisId: string;
+  incidentId: string;
+  demoMode: boolean;
+}) {
+  const plan = usePlanResponse();
+  const activate = useActivateResponse();
+  const verify = useVerifyRecovery();
+
+  const planned = plan.data;
+  const activated = activate.data;
+  const recovery = verify.data?.recovery;
+
+  const input = { analysisId, incidentId };
+
+  return (
+    <div className="space-y-3 border-t pt-4">
+      <div>
+        <h3 className="text-sm font-semibold">Response Controls</h3>
+        <p className="text-xs text-muted-foreground">
+          Offline replay simulation only. No real CAN frames are transmitted.
+        </p>
+      </div>
+
+      {demoMode && (
+        <p className="text-xs text-orange-600">
+          Response execution requires backend API mode.
+        </p>
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        <Button
+          variant="outline"
+          disabled={demoMode || plan.isPending}
+          onClick={() =>
+            plan.mutate(input, {
+              onError: (error) => toast.error("Planning failed", {
+                description: error.message,
+              }),
+            })
+          }
+        >
+          {plan.isPending ? <Loader2 className="animate-spin" /> : null}
+          Plan Response
+        </Button>
+
+        <Button
+          disabled={
+            demoMode ||
+            !planned ||
+            planned.action === "MANUAL_REVIEW" ||
+            activate.isPending
+          }
+          onClick={() =>
+            activate.mutate(input, {
+              onError: (error) => toast.error("Activation failed", {
+                description: error.message,
+              }),
+            })
+          }
+        >
+          {activate.isPending ? <Loader2 className="animate-spin" /> : null}
+          Activate Simulation
+        </Button>
+
+        <Button
+          variant="outline"
+          disabled={
+            demoMode ||
+            !activated?.replay_result ||
+            verify.isPending
+          }
+          onClick={() =>
+            verify.mutate(input, {
+              onError: (error) => toast.error("Verification failed", {
+                description: error.message,
+              }),
+            })
+          }
+        >
+          {verify.isPending ? <Loader2 className="animate-spin" /> : null}
+          Verify Recovery
+        </Button>
+      </div>
+
+      {planned && (
+        <div className="rounded-lg border bg-secondary/30 p-3 text-sm">
+          <p className="font-semibold">Response Plan</p>
+          <p>Classification: {planned.classification}</p>
+          <p>Action: {planned.action}</p>
+          <p>{planned.description}</p>
+          <p>Target CAN IDs: {planned.target_can_ids.join(", ") || "None"}</p>
+        </div>
+      )}
+
+      {activated?.replay_result && (
+        <div className="rounded-lg border bg-secondary/30 p-3 text-sm">
+          <p className="font-semibold">Offline Replay Results</p>
+          <p>Status: {activated.status}</p>
+          <p>Frames before: {activated.replay_result.before.total_frames}</p>
+          <p>Frames after: {activated.replay_result.after.total_frames}</p>
+          <p>Removed frames: {activated.replay_result.removed_frames}</p>
+          <p>
+            Original capture preserved:{" "}
+            {activated.replay_result.original_preserved ? "Yes" : "No"}
+          </p>
+        </div>
+      )}
+
+      {recovery && (
+        <div className="rounded-lg border p-3 text-sm">
+          <p className="font-semibold">Recovery Verification</p>
+          <p>
+            Result: {recovery.verified ? "Verified in offline replay" : "Not verified"}
+          </p>
+          <p>Baseline rate: {recovery.baseline_frame_rate.toFixed(2)} frames/sec</p>
+          <p>Replay rate: {recovery.post_mitigation_frame_rate.toFixed(2)} frames/sec</p>
+          <p>Remaining unexpected IDs: {recovery.remaining_unexpected_ids}</p>
+        </div>
+      )}
+    </div>
   );
 }

@@ -36,6 +36,10 @@ if __package__:
         parse_csv_records,
     )
     from .live_session_manager import LiveSessionManager
+    from .response_engine import ResponseEngine
+    from .replay_mitigator import ReplayMitigator
+
+
 else:
     from api_analysis_service import (
         ApiAnalysisService,
@@ -44,7 +48,8 @@ else:
         parse_csv_records,
     )
     from live_session_manager import LiveSessionManager
-
+    from response_engine import ResponseEngine
+    from replay_mitigator import ReplayMitigator
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND_VERSION = "0.9.0-fastapi"
 
@@ -89,6 +94,9 @@ live_manager = LiveSessionManager(
     captures_dir=ROOT / "data",
     sniffer_path=ROOT / "build" / "can_sniffer",
 )
+response_engine = ResponseEngine()
+replay_mitigator = ReplayMitigator()
+response_replays = {}
 
 
 # Pydantic request models
@@ -256,6 +264,188 @@ def get_analysis_detail(analysis_id: str):
         )
     return res
 
+@app.post(
+    "/api/analyses/{analysis_id}/incidents/{incident_id}/response/plan"
+)
+def plan_incident_response(analysis_id: str, incident_id: str):
+    """Create an evidence-backed offline response plan."""
+
+    incident = get_stored_incident(analysis_id, incident_id)
+
+    try:
+        return response_engine.plan(incident)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+
+@app.post(
+    "/api/analyses/{analysis_id}/incidents/{incident_id}/response/activate"
+)
+def activate_incident_response(analysis_id: str, incident_id: str):
+    """Activate an evidence-backed response in offline replay only."""
+
+    incident = get_stored_incident(analysis_id, incident_id)
+    storage_key = get_response_storage_key(analysis_id, incident_id)
+
+    try:
+        existing = response_engine.get_response(storage_key)
+
+        if existing and existing.get("replay_result"):
+            existing["incident_id"] = incident_id
+            return existing
+
+        scoped_incident = {
+            **incident,
+            "incident_id": storage_key,
+        }
+
+        response = response_engine.activate(scoped_incident)
+
+        if response["action"] == "MANUAL_REVIEW":
+            response["incident_id"] = incident_id
+            return response
+
+        records = analysis_service.get_capture_records(analysis_id)
+
+        if not records:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Original capture records are unavailable.",
+            )
+
+        replay_result = replay_mitigator.apply(
+            records=records,
+            response=response,
+            target_can_ids=response["target_can_ids"],
+        )
+
+        result = response_engine.attach_replay_result(
+            storage_key,
+            replay_result,
+        )
+
+        response_replays[storage_key] = replay_result
+        result["incident_id"] = incident_id
+
+        return result
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+def get_response_storage_key(analysis_id: str, incident_id: str) -> str:
+    """Create an analysis-scoped key for response state."""
+    return f"{analysis_id}:{incident_id}"
+@app.post(
+    "/api/analyses/{analysis_id}/incidents/{incident_id}/response/verify"
+)
+def verify_incident_recovery(analysis_id: str, incident_id: str):
+    """Verify recovery using original and offline replay capture records."""
+
+    incident = get_stored_incident(analysis_id, incident_id)
+    storage_key = get_response_storage_key(analysis_id, incident_id)
+
+    response = response_engine.get_response(storage_key)
+
+    if not response:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Response not found. Activate a response first.",
+        )
+
+    if response.get("status") != "SIMULATED_ACTIVE":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Response is not awaiting recovery verification.",
+        )
+
+    replay_result = response_replays.get(storage_key)
+
+    if not replay_result:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Offline replay result is unavailable.",
+        )
+
+    original_records = analysis_service.get_capture_records(analysis_id)
+
+    if not original_records:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Original capture records are unavailable.",
+        )
+
+    replay_records = replay_result.get("replay_records", [])
+    target_ids = set(response.get("target_can_ids", []))
+
+    timestamps = [r["timestamp_ns"] for r in original_records]
+    duration_seconds = max(
+        1.0,
+        (max(timestamps) - min(timestamps)) / 1_000_000_000,
+    )
+
+    baseline_count = sum(
+        1 for r in original_records if r["can_id"] in target_ids
+    )
+    post_count = sum(
+        1 for r in replay_records if r["can_id"] in target_ids
+    )
+
+    baseline_rate = baseline_count / duration_seconds
+    post_rate = post_count / duration_seconds
+
+    unexpected_targets = set(
+        incident.get("response_evidence", {}).get(
+            "unexpected_can_ids", []
+        )
+    )
+
+    remaining_unexpected_ids = len({
+        r["can_id"]
+        for r in replay_records
+        if r["can_id"] in unexpected_targets
+    })
+
+    try:
+        result = response_engine.verify_recovery(
+            incident_id=storage_key,
+            baseline_frame_rate=baseline_rate,
+            post_mitigation_frame_rate=post_rate,
+            remaining_unexpected_ids=remaining_unexpected_ids,
+        )
+        result["incident_id"] = incident_id
+        return result
+
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        )
+
+def get_stored_incident(analysis_id: str, incident_id: str):
+    """Retrieve an incident belonging to a stored backend analysis."""
+
+    analysis = analysis_service.get_analysis(analysis_id)
+
+    if not analysis:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Analysis not found.",
+        )
+
+    incidents = analysis.get("incidents", [])
+
+    for incident in incidents:
+        if incident.get("incident_id") == incident_id:
+            return incident
+
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Incident not found in this analysis.",
+    )
 
 @app.post("/api/analyses/upload")
 async def upload_capture(file: UploadFile = File(...)):

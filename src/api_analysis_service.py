@@ -6,6 +6,8 @@ saved Isolation Forest baseline model and CAN-Sentinel feature pipeline.
 """
 
 import csv
+from collections import Counter, defaultdict
+from copy import deepcopy
 import io
 import math
 import re
@@ -199,6 +201,7 @@ class ApiAnalysisService:
         self.reports_dir.mkdir(parents=True, exist_ok=True)
         self._analyses: Dict[str, Dict[str, Any]] = {}
         self._report_files: Dict[str, Path] = {}
+        self._capture_records: Dict[str, List[Dict[str, Any]]] = {}
 
     def score_records(
         self,
@@ -232,6 +235,15 @@ class ApiAnalysisService:
         predictions = model.predict(X)
         scores = model.score_samples(X)
 
+        # Build exact per-ID evidence using the same window boundaries.
+        first_ns = min(record["timestamp_ns"] for record in records)
+        window_ns = WINDOW_MS * 1_000_000
+        response_counts_by_window = defaultdict(Counter)
+
+        for record in records:
+            index = (record["timestamp_ns"] - first_ns) // window_ns
+            response_counts_by_window[index][record["can_id"]] += 1
+
         scored_windows = []
         report_rows = []
         normal_count = 0
@@ -249,6 +261,29 @@ class ApiAnalysisService:
 
             window_feats = {col: float(w[col]) for col in FEATURE_COLUMNS}
 
+            id_counts = response_counts_by_window[int(w["window_index"])]
+            can_id_counts = dict(sorted(id_counts.items()))
+            unexpected_ids = sorted(
+                can_id for can_id in id_counts
+                if can_id not in KNOWN_IDS
+            )
+
+            dominant_id = (
+                max(id_counts, key=lambda can_id: (id_counts[can_id], can_id))
+                if id_counts else None
+            )
+            dominant_share = (
+                round(id_counts[dominant_id] / sum(id_counts.values()) * 100, 4)
+                if dominant_id is not None else 0.0
+            )
+
+            response_evidence = {
+                "can_id_counts": can_id_counts,
+                "unexpected_can_ids": unexpected_ids,
+                "dominant_can_id": dominant_id,
+                "dominant_can_id_share_pct": dominant_share,
+            }
+
             scored_windows.append({
                 "window_index": int(w["window_index"]),
                 "window_start_utc": str(w["window_start_utc"]),
@@ -256,6 +291,7 @@ class ApiAnalysisService:
                 "anomaly_score": anom_score,
                 "features": window_feats,
                 "explanation": explain_window(window_feats, pred_label),
+                "response_evidence": response_evidence,
             })
 
             # For reports/<capture>_inference.csv
@@ -320,10 +356,16 @@ class ApiAnalysisService:
         }
 
         self._analyses[aid] = result
+        self._capture_records[aid] = deepcopy(records)
         return result
 
     def get_analysis(self, aid: str) -> Optional[Dict[str, Any]]:
         return self._analyses.get(aid)
+
+    def get_capture_records(self, aid: str) -> Optional[List[Dict[str, Any]]]:
+        """Return a protected copy of the original capture records."""
+        records = self._capture_records.get(aid)
+        return deepcopy(records) if records is not None else None
 
     def list_analyses(self) -> List[Dict[str, Any]]:
         """List summary objects in reverse chronological order."""

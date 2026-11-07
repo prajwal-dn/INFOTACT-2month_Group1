@@ -9,6 +9,15 @@ export const endpoints = {
   liveStart: () => "/api/live/start",
   live: (id: string) => `/api/live/${encodeURIComponent(id)}`,
   liveStop: (id: string) => `/api/live/${encodeURIComponent(id)}/stop`,
+
+  responsePlan: (analysisId: string, incidentId: string) =>
+  `/api/analyses/${encodeURIComponent(analysisId)}/incidents/${encodeURIComponent(incidentId)}/response/plan`,
+
+  responseActivate: (analysisId: string, incidentId: string) =>
+  `/api/analyses/${encodeURIComponent(analysisId)}/incidents/${encodeURIComponent(incidentId)}/response/activate`,
+
+  responseVerify: (analysisId: string, incidentId: string) =>
+  `/api/analyses/${encodeURIComponent(analysisId)}/incidents/${encodeURIComponent(incidentId)}/response/verify`,
 } as const;
 
 export function joinUrl(baseUrl: string, path: string) {
