@@ -105,6 +105,15 @@ def correlate_incidents(windows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
     for window in windows:
         if window.get("prediction") == "ANOMALY":
+            # Split incidents when window indices are not consecutive.
+            if current:
+                previous_index = current[-1]["window_index"]
+                current_index = window["window_index"]
+
+                if current_index != previous_index + 1:
+                    close_incident(current)
+                    current = []
+
             current.append(window)
         else:
             close_incident(current)

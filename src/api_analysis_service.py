@@ -224,7 +224,7 @@ class ApiAnalysisService:
         # Build 1000ms fixed windows anchored to the first frame
         windows = build_window_features(records, WINDOW_MS)
         excluded_partial_window: Optional[int] = None
-        if len(windows) > 1:
+        if windows:
             discarded = windows.pop()
             excluded_partial_window = int(discarded["window_index"])
 

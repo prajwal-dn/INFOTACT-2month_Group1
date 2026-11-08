@@ -131,3 +131,26 @@ def test_missing_response_evidence_is_safe():
     assert evidence["unexpected_can_ids"] == []
     assert evidence["dominant_can_id"] is None
     assert evidence["dominant_can_id_share_pct"] == 0.0
+
+
+def test_missing_window_indices_separate_incidents():
+    windows = [
+        make_window(0, "ANOMALY"),
+        make_window(156, "ANOMALY"),
+        make_window(157, "NORMAL"),
+        make_window(158, "NORMAL"),
+        make_window(159, "ANOMALY"),
+    ]
+
+    incidents = correlate_incidents(windows)
+
+    assert len(incidents) == 3
+
+    assert incidents[0]["start_window"] == 0
+    assert incidents[0]["end_window"] == 0
+
+    assert incidents[1]["start_window"] == 156
+    assert incidents[1]["end_window"] == 156
+
+    assert incidents[2]["start_window"] == 159
+    assert incidents[2]["end_window"] == 159
