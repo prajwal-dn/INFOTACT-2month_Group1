@@ -73,6 +73,14 @@ export function useStartLive() {
   return useMutation({ mutationFn: () => client.startLiveCapture() });
 }
 
+export function useStartLiveAttack() {
+  const { client } = useApi();
+  return useMutation({
+    mutationFn: (input: { id: string; mode: 1 | 2 }) =>
+      client.startLiveAttack(input.id, input.mode),
+  });
+}
+
 export function useStopLive() {
   const { client } = useApi();
   const storeAnalysis = useStoreAnalysis();

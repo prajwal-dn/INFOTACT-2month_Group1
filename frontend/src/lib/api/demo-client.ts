@@ -332,7 +332,11 @@ export function createDemoClient(): ApiClient {
       if (!windows.length) throw new ApiError("Not enough complete windows to score this capture.", 422);
       return store(finalize(`demo-${++counter}`, live.session.capture_file, "live", windows, live.session.pending_window_index));
        },
-        async planResponse(_analysisId, _incidentId) {
+        async startLiveAttack(_id, _mode) {
+      throw new ApiError("Attack simulation is available only in backend API mode.", 501);
+    },
+
+    async planResponse(_analysisId, _incidentId) {
       throw new ApiError(
         "Response planning requires backend API mode. Demo mode does not run the response engine.",
         501,

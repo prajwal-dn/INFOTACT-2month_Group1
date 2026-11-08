@@ -343,3 +343,31 @@ def test_recovery_uses_original_capture_time_span(
 
     assert recovery["baseline_frame_rate"] > 0
     assert recovery["post_mitigation_frame_rate"] >= 0
+
+
+def test_automatic_live_incident_response_end_to_end(
+    client,
+    monkeypatch,
+):
+    """Verify registration-backed automatic plan, replay, and recovery."""
+    setup_analysis(monkeypatch)
+
+    result = api_server.process_live_incident_automatically(
+        "ANALYSIS-A",
+        "INC-0001",
+    )
+
+    assert result["plan"]["classification"] == "HIGH_FREQUENCY_FLOOD"
+    assert result["plan"]["action"] == "SIMULATED_RATE_LIMIT"
+
+    assert result["activation"]["status"] == "SIMULATED_ACTIVE"
+    assert result["activation"]["mode"] == "SIMULATION"
+    assert result["activation"]["replay_result"]["mode"] == "OFFLINE_SIMULATION"
+    assert result["activation"]["replay_result"]["original_preserved"] is True
+
+    assert result["verification"]["status"] in (
+        "MITIGATED",
+        "RECOVERY_FAILED",
+    )
+    assert result["status"] == result["verification"]["status"]
+    assert "recovery" in result["verification"]

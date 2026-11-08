@@ -359,6 +359,65 @@ class ApiAnalysisService:
         self._capture_records[aid] = deepcopy(records)
         return result
 
+    def register_live_incident(
+        self,
+        analysis_id: str,
+        incident: Dict[str, Any],
+        records: List[Dict[str, Any]],
+        capture_name: str,
+    ) -> Dict[str, Any]:
+        """Store one finalized live incident with its isolated evidence records."""
+        if not analysis_id or not incident.get("incident_id"):
+            raise ValueError("A valid analysis ID and incident ID are required.")
+
+        if not records:
+            raise ValueError("Cannot register a live incident without evidence records.")
+
+        if analysis_id in self._analyses:
+            raise ValueError(f"Analysis {analysis_id} is already registered.")
+
+        incident_copy = deepcopy(incident)
+        records_copy = deepcopy(records)
+        windows = deepcopy(incident_copy.get("windows", []))
+
+        normal_count = sum(
+            window.get("prediction") == "NORMAL" for window in windows
+        )
+        anomaly_count = sum(
+            window.get("prediction") == "ANOMALY" for window in windows
+        )
+
+        created_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        frequency_summary = [
+            format_frequency_row(row)
+            for row in build_frequency_summary(records_copy)
+        ]
+
+        result = {
+            "id": analysis_id,
+            "data_source": "backend",
+            "capture_file": capture_name,
+            "origin": "live",
+            "created_at": created_at,
+            "frames_loaded": len(records_copy),
+            "windows_scored": len(windows),
+            "normal_count": normal_count,
+            "anomaly_count": anomaly_count,
+            "excluded_partial_window": None,
+            "model": get_model_info(self.model_path),
+            "windows": windows,
+            "incidents": [incident_copy],
+            "frequency_summary": frequency_summary,
+            "notes": [
+                "Incident-specific evidence snapshot from live vcan0 monitoring.",
+                "Response actions operate on offline replay only.",
+            ],
+        }
+
+        self._analyses[analysis_id] = result
+        self._capture_records[analysis_id] = records_copy
+        return deepcopy(result)
+
     def get_analysis(self, aid: str) -> Optional[Dict[str, Any]]:
         return self._analyses.get(aid)
 

@@ -13,6 +13,7 @@ import {
   ApiErrorBody,
   CapturePreset,
   LiveSession,
+  LiveAttackResult,
   SystemStatus,
 } from "./schemas";
 
@@ -91,6 +92,7 @@ export function createHttpClient(baseUrl: string, fetchImpl: typeof fetch = fetc
     startLiveCapture: () => json(LiveSession, endpoints.liveStart(), post()),
     getLiveSession: (id) => json(LiveSession, endpoints.live(id)),
     stopLiveCapture: (id) => json(AnalysisResult, endpoints.liveStop(id), post()),
+    startLiveAttack: (id, mode) => json(LiveAttackResult, endpoints.liveAttack(id), post({ mode })),
     planResponse: (analysisId, incidentId) =>
     json(ResponsePlan, endpoints.responsePlan(analysisId, incidentId), post()),
 

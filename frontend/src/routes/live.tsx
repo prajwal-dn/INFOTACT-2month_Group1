@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Loader2, Radio, ShieldAlert, Square } from "lucide-react";
+import { Loader2, Radio, ShieldAlert, Square, Zap } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,7 @@ import { liveAnomalyMessage, liveStartMessage, liveStopMessage } from "@/lib/aud
 import { useBackendConfig } from "@/lib/api";
 import { BusActivityWave } from "@/components/app/BusActivityWave";
 import { setActiveLiveSession } from "@/lib/live-session-store";
-import { useLiveSession, useStartLive, useStatus, useStopLive } from "@/lib/api/queries";
+import { useLiveSession, useStartLive, useStartLiveAttack, useStatus, useStopLive } from "@/lib/api/queries";
 import { pageHead } from "@/lib/head";
 import { cn } from "@/lib/utils";
 
@@ -37,6 +37,8 @@ function LiveMonitor() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const start = useStartLive();
   const stop = useStopLive();
+  const attack = useStartLiveAttack();
+  const [attackMode, setAttackMode] = useState<1 | 2>(1);
   const session = useLiveSession(sessionId, !stop.isPending);
   const s = session.data;
   const capturing = s?.state === "capturing";
@@ -70,6 +72,14 @@ function LiveMonitor() {
       },
       onError: (e) => toast.error("Capture failed to start", { description: e.message }),
     });
+
+  const onStartAttack = () => {
+    if (!sessionId) return;
+    attack.mutate({ id: sessionId, mode: attackMode }, {
+      onSuccess: (result) => toast.success(`Attack simulator started · PID ${result.pid}`),
+      onError: (e) => toast.error("Attack simulator failed to start", { description: e.message }),
+    });
+  };
 
   const onStop = () => {
     if (!sessionId) return;
@@ -138,6 +148,31 @@ function LiveMonitor() {
               </p>
             )}
           </Panel>
+          { !demo && capturing && s?.interface === "vcan0" && (
+            <Panel title="Isolated attack simulator" aside={<span className="text-xs text-muted-foreground">vcan0 only</span>}>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                Generates lab traffic on the virtual CAN interface. Detection automatically stops this simulator; capture continues.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button size="sm" variant={attackMode === 1 ? "default" : "outline"} onClick={() => setAttackMode(1)} disabled={attack.isPending || s?.attack?.state === "RUNNING"}>
+                  Mode 1 · Flood
+                </Button>
+                <Button size="sm" variant={attackMode === 2 ? "default" : "outline"} onClick={() => setAttackMode(2)} disabled={attack.isPending || s?.attack?.state === "RUNNING"}>
+                  Mode 2 · Extended ID
+                </Button>
+                <Button size="sm" onClick={onStartAttack} disabled={attack.isPending || s?.attack?.state === "RUNNING" || s?.recovery?.state === "ATTACK_STOPPED_VERIFYING"}>
+                  {attack.isPending ? <Loader2 className="animate-spin" /> : <Zap />} Start attack
+                </Button>
+              </div>
+              <dl className="mt-3 space-y-2 font-mono text-xs">
+                <Row k="simulator" v={s?.attack?.state ?? "NOT_STARTED"} />
+                <Row k="recovery" v={s?.recovery?.state ?? "NOT_STARTED"} />
+                <Row k="normal windows" v={`${s?.recovery?.normal_windows ?? 0} / ${s?.recovery?.required_normal_windows ?? 2}`} />
+              </dl>
+              {s?.recovery?.state === "RECOVERED" && <p className="mt-3 text-xs text-success">Two consecutive normal model windows observed after the simulator stopped. This is model-based recovery evidence, not proof of vehicle or ECU health.</p>}
+              {s?.recovery?.state === "ATTACK_STOPPED_VERIFYING" && <p className="mt-3 text-xs text-warning">Simulator stopped automatically. Waiting for two consecutive normal windows; capture remains active.</p>}
+            </Panel>
+          )}
         </div>
 
         <div className="min-w-0 space-y-6">

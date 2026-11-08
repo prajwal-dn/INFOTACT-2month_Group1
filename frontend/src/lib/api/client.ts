@@ -7,6 +7,7 @@ import type {
   AnalysisSummary,
   CapturePreset,
   LiveSession,
+  LiveAttackResult,
   SystemStatus,
 } from "./schemas";
 
@@ -28,6 +29,7 @@ export interface ApiClient {
   getLiveSession(id: string): Promise<LiveSession>;
   /** Stop capture and run final inference ("Stop & Analyze"). */
   stopLiveCapture(id: string): Promise<AnalysisResult>;
+  startLiveAttack(id: string, mode: 1 | 2): Promise<LiveAttackResult>;
   planResponse(analysisId: string, incidentId: string): Promise<ResponsePlan>;
 
   activateResponse(analysisId: string, incidentId: string): Promise<ResponseActivation>;

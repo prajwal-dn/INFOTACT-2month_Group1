@@ -13,6 +13,7 @@ Orchestrates:
 import csv
 import json
 import os
+import queue
 import signal
 import socket
 import subprocess
@@ -27,8 +28,10 @@ import joblib
 
 if __package__:
     from .alert_explainer import explain_window
+    from .incident_engine import correlate_incidents
 else:
     from alert_explainer import explain_window
+    from incident_engine import correlate_incidents
 
 if __package__:
     from .api_analysis_service import (
@@ -40,6 +43,7 @@ if __package__:
     )
     from .frequency_analyzer import (
         EXPECTED_HEADER,
+        KNOWN_IDS,
         build_frequency_summary,
         build_window_features,
         ns_to_timestamp,
@@ -57,6 +61,7 @@ else:
     )
     from frequency_analyzer import (
         EXPECTED_HEADER,
+        KNOWN_IDS,
         build_frequency_summary,
         build_window_features,
         ns_to_timestamp,
@@ -90,9 +95,193 @@ class LiveSessionManager:
         self._lock = threading.RLock()
         self._active_session: Optional[Dict[str, Any]] = None
         self._sniffer_proc: Optional[subprocess.Popen] = None
+        self._attack_proc: Optional[subprocess.Popen] = None
         self._server_sock: Optional[socket.socket] = None
         self._receiver_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
+        self._incident_queue = queue.Queue()
+        self._incident_handler = None
+        self._shutdown_lock = threading.Lock()
+        self._shutdown_requested = False
+        self._shutdown_complete = False
+        self._incident_worker = threading.Thread(
+            target=self._incident_worker_loop,
+            daemon=True,
+            name="CANIncidentWorker",
+        )
+        self._incident_worker.start()
+
+    def set_incident_handler(self, handler) -> None:
+        """Set an optional callback for automatic incident response."""
+        self._incident_handler = handler
+    def start_attack(self, session_id: str, mode: int = 1) -> Dict[str, Any]:
+        """Start a backend-owned attack simulator on vcan0."""
+        if mode not in (1, 2):
+            raise ValueError("Attack mode must be 1 or 2.")
+
+        with self._lock:
+            session = self._active_session
+
+            if not session or session["id"] != session_id:
+                raise ValueError("Live session not found.")
+
+            if session.get("interface") != "vcan0":
+                raise ValueError("Attack generation is restricted to vcan0.")
+
+            if session.get("state") != "capturing":
+                raise ValueError("Live capture is not running.")
+
+            if self._attack_proc and self._attack_proc.poll() is None:
+                raise RuntimeError("An attack simulator is already running.")
+
+            attack_path = ROOT / "build" / "attack_simulator"
+
+            if not attack_path.is_file() or not os.access(attack_path, os.X_OK):
+                raise FileNotFoundError("Attack simulator binary is unavailable.")
+
+            self._attack_proc = subprocess.Popen(
+                [str(attack_path), str(mode)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            session["attack"] = {
+                "mode": mode,
+                "pid": self._attack_proc.pid,
+                "state": "RUNNING",
+            }
+
+            session["recovery"] = {
+                "state": "ATTACK_RUNNING",
+                "normal_windows": 0,
+                "required_normal_windows": 2,
+                "stopped_after_window_index": None,
+            }
+            return dict(session["attack"])
+
+    def stop_attack(self, session_id: str) -> Dict[str, Any]:
+        """Stop only the attack process owned by this manager."""
+        with self._lock:
+            session = self._active_session
+
+            if not session or session["id"] != session_id:
+                raise ValueError("Live session not found.")
+
+            proc = self._attack_proc
+
+            if proc is None:
+                return {"state": "NOT_RUNNING"}
+
+            if proc.poll() is None:
+                proc.send_signal(signal.SIGINT)
+
+                try:
+                    proc.wait(timeout=3.0)
+                except subprocess.TimeoutExpired:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=2.0)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait(timeout=2.0)
+
+            self._attack_proc = None
+
+            session["attack"] = {
+                **session.get("attack", {}),
+                "state": "STOPPED",
+                "return_code": proc.returncode,
+            }
+            session["recovery"] = {
+                "state": "ATTACK_STOPPED_VERIFYING",
+                "normal_windows": 0,
+                "required_normal_windows": 2,
+                "stopped_after_window_index": len(session.get("windows", [])) - 1,
+            }
+
+            return dict(session["attack"])
+    def shutdown(self, timeout: float = 10.0) -> None:
+        """Stop capture, drain queued incidents, and shut down the worker."""
+        with self._shutdown_lock:
+            if self._shutdown_complete:
+                return
+
+            if not self._shutdown_requested:
+                with self._lock:
+                    session = self._active_session
+                    session_id = (
+                        session["id"]
+                        if session and session.get("state") in ("capturing", "stopping")
+                        else None
+                    )
+
+                if session_id:
+                    self.stop_session(session_id)
+
+                # Do not terminate the worker while jobs remain queued.
+                self._incident_queue.join()
+                self._incident_queue.put(None)
+                self._shutdown_requested = True
+
+            self._incident_worker.join(timeout=timeout)
+            if self._incident_worker.is_alive():
+                raise TimeoutError(
+                    "Incident worker did not stop within the shutdown timeout."
+                )
+
+            self._shutdown_complete = True
+
+    def _incident_worker_loop(self) -> None:
+        """Register and process incidents outside the capture thread."""
+        while True:
+            job = self._incident_queue.get()
+            try:
+                if job is None:
+                    return
+
+                # Stop only the attack process launched by this manager.
+                attack_result = self.stop_attack(job["session_id"])
+
+                self.analysis_service.register_live_incident(
+                    analysis_id=job["analysis_id"],
+                    incident=job["incident"],
+                    records=job["records"],
+                    capture_name=job["capture_name"],
+                )
+
+                result = None
+                if self._incident_handler is not None:
+                    result = self._incident_handler(
+                        job["analysis_id"],
+                        job["incident"]["incident_id"],
+                    )
+
+                with self._lock:
+                    session = self._active_session
+                    if session and session["id"] == job["session_id"]:
+                        for item in session.get("incidents", []):
+                            if item.get("analysis_id") == job["analysis_id"]:
+                                item["analysis_registered"] = True
+                                item["response_state"] = (
+                                    result.get("status", "REGISTERED")
+                                    if isinstance(result, dict)
+                                    else "REGISTERED"
+                                )
+                                if isinstance(result, dict):
+                                    item["response_result"] = result
+                                break
+
+            except Exception as exc:
+                with self._lock:
+                    session = self._active_session
+                    if session and session["id"] == job.get("session_id"):
+                        for item in session.get("incidents", []):
+                            if item.get("analysis_id") == job.get("analysis_id"):
+                                item["response_state"] = "ERROR"
+                                item["error"] = str(exc)
+                                break
+            finally:
+                self._incident_queue.task_done()
 
     def get_active_session_snapshot(self, session_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """Return a thread-safe snapshot of the requested or active live session."""
@@ -113,6 +302,13 @@ class LiveSessionManager:
                 "started_at": s["started_at"],
                 "frames_captured": s["frames_captured"],
                 "windows": list(s["windows"]),
+                "incidents": list(s.get("incidents", [])),
+                "attack": dict(s.get("attack", {"state": "NOT_STARTED"})),
+                "recovery": dict(s.get("recovery", {
+                    "state": "NOT_STARTED",
+                    "normal_windows": 0,
+                    "required_normal_windows": 2,
+                })),
                 "pending_window_index": s["pending_window_index"],
                 "message": s["message"],
             }
@@ -153,6 +349,17 @@ class LiveSessionManager:
                 "started_at": started_at,
                 "frames_captured": 0,
                 "windows": [],
+                "incidents": [],
+                "attack": {"state": "NOT_STARTED"},
+                "recovery": {
+                    "state": "NOT_STARTED",
+                    "normal_windows": 0,
+                    "required_normal_windows": 2,
+                    "stopped_after_window_index": None,
+                },
+                "open_incident_windows": [],
+                "open_incident_records": [],
+                "incident_records": {},
                 "pending_window_index": None,
                 "message": "Live capture initialized",
                 "records": [],
@@ -474,6 +681,49 @@ class LiveSessionManager:
             ctx["current_records"].append(record)
             s["pending_window_index"] = int(window_idx)
 
+    def _close_live_incident(self, session_dict: Dict[str, Any]) -> None:
+        """Queue a finalized incident for processing outside the capture lock."""
+        group = list(session_dict.get("open_incident_windows", []))
+        records = list(session_dict.get("open_incident_records", []))
+
+        session_dict["open_incident_windows"] = []
+        session_dict["open_incident_records"] = []
+
+        if not group or not records:
+            return
+
+        correlated = correlate_incidents(group)
+        if not correlated:
+            return
+
+        sequence = len(session_dict.get("incidents", [])) + 1
+        incident = dict(correlated[0])
+        incident["incident_id"] = f"INC-{sequence:04d}"
+
+        analysis_id = (
+            f"analysis_live_{session_dict['id']}_incident_{sequence:04d}"
+        )
+        capture_name = session_dict.get("capture_filename", "live_capture.csv")
+
+        incident_summary = dict(incident)
+        incident_summary["analysis_id"] = analysis_id
+        incident_summary["analysis_registered"] = False
+        incident_summary["response_state"] = "QUEUED"
+
+        session_dict.setdefault("incidents", []).append(incident_summary)
+        session_dict.setdefault("incident_records", {})[analysis_id] = {
+            "incident_id": incident["incident_id"],
+            "frame_count": len(records),
+        }
+
+        self._incident_queue.put({
+            "session_id": session_dict["id"],
+            "analysis_id": analysis_id,
+            "incident": incident,
+            "records": records,
+            "capture_name": capture_name,
+        })
+
     def _score_and_record_window(
         self,
         model: Any,
@@ -499,17 +749,97 @@ class LiveSessionManager:
         window_start = ns_to_timestamp(anchor_ns + window_index * WINDOW_NS)
 
         feats = {col: float(w[col]) for col in FEATURE_COLUMNS}
-        session_dict["windows"].append({
+
+        # Build response evidence from this live window only.
+        id_counts = {}
+        for record in records:
+            can_id = record["can_id"]
+            id_counts[can_id] = id_counts.get(can_id, 0) + 1
+
+        total_frames = sum(id_counts.values())
+        dominant_id = (
+            max(id_counts, key=lambda can_id: (id_counts[can_id], can_id))
+            if id_counts else None
+        )
+        dominant_share = (
+            round(id_counts[dominant_id] / total_frames * 100, 4)
+            if dominant_id is not None and total_frames else 0.0
+        )
+
+        response_evidence = {
+            "can_id_counts": dict(sorted(id_counts.items())),
+            "unexpected_can_ids": sorted(
+                can_id for can_id in id_counts if can_id not in KNOWN_IDS
+            ),
+            "dominant_can_id": dominant_id,
+            "dominant_can_id_share_pct": dominant_share,
+        }
+
+        scored_window = {
             "window_index": int(window_index),
             "window_start_utc": window_start,
             "prediction": label,
             "anomaly_score": anom_score,
             "features": feats,
             "explanation": explain_window(feats, label),
-        })
+            "response_evidence": response_evidence,
+        }
+        session_dict["windows"].append(scored_window)
+
+        # Verify recovery only with windows captured after the owned attack stopped.
+        recovery = session_dict.setdefault("recovery", {})
+        if recovery.get("state") == "ATTACK_STOPPED_VERIFYING":
+            stopped_after = recovery.get("stopped_after_window_index")
+            if stopped_after is not None and int(window_index) > stopped_after:
+                if label == "NORMAL":
+                    recovery["normal_windows"] = recovery.get("normal_windows", 0) + 1
+                else:
+                    recovery["normal_windows"] = 0
+
+                if recovery["normal_windows"] >= recovery.get("required_normal_windows", 2):
+                    recovery["state"] = "RECOVERED"
+
+        open_windows = session_dict.setdefault("open_incident_windows", [])
+        open_records = session_dict.setdefault("open_incident_records", [])
+
+        if label == "ANOMALY":
+            # Avoid duplicate incident jobs while a response is pending.
+            if session_dict.get("attack_response_queued"):
+                return
+
+            if open_windows:
+                previous_index = open_windows[-1]["window_index"]
+                if int(window_index) != previous_index + 1:
+                    if len(open_windows) >= 2:
+                        session_dict["attack_response_queued"] = True
+                        self._close_live_incident(session_dict)
+                        return
+                    open_windows.clear()
+                    open_records.clear()
+
+            open_windows.append(scored_window)
+            open_records.extend(records)
+
+            # Two consecutive anomalous windows trigger automatic response.
+            if len(open_windows) >= 2:
+                session_dict["attack_response_queued"] = True
+                self._close_live_incident(session_dict)
+        else:
+            if len(open_windows) >= 2 and not session_dict.get("attack_response_queued"):
+                session_dict["attack_response_queued"] = True
+                self._close_live_incident(session_dict)
+            else:
+                open_windows.clear()
+                open_records.clear()
+
+            # A normal window allows a later incident to be detected.
+            session_dict["attack_response_queued"] = False
 
     def stop_session(self, session_id: str) -> Dict[str, Any]:
         """Stop capture, discard final incomplete window, score all frames, return AnalysisResult."""
+        # Stop only the attack simulator owned by this manager.
+        self.stop_attack(session_id)
+
         with self._lock:
             if not self._active_session or self._active_session["id"] != session_id:
                 raise ValueError(f"Session {session_id} not found or not active")
@@ -543,6 +873,9 @@ class LiveSessionManager:
 
         with self._lock:
             s = self._active_session
+            self._close_live_incident(s)
+            if s.get("recovery", {}).get("state") == "ATTACK_STOPPED_VERIFYING":
+                s["recovery"]["state"] = "RECOVERY_UNCONFIRMED"
             s["state"] = "stopped"
             records = list(s.get("records", []))
             capture_path = Path(s["capture_file"])

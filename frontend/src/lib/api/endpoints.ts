@@ -9,6 +9,7 @@ export const endpoints = {
   liveStart: () => "/api/live/start",
   live: (id: string) => `/api/live/${encodeURIComponent(id)}`,
   liveStop: (id: string) => `/api/live/${encodeURIComponent(id)}/stop`,
+  liveAttack: (id: string) => `/api/live/${encodeURIComponent(id)}/attack`,
 
   responsePlan: (analysisId: string, incidentId: string) =>
   `/api/analyses/${encodeURIComponent(analysisId)}/incidents/${encodeURIComponent(incidentId)}/response/plan`,

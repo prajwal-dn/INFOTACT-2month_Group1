@@ -16,6 +16,7 @@ Provides standard REST endpoints matching the Lovable React frontend contracts:
 
 import os
 import shutil
+from contextlib import asynccontextmanager
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -53,8 +54,17 @@ else:
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND_VERSION = "0.9.0-fastapi"
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        yield
+    finally:
+        live_manager.shutdown()
+
+
 app = FastAPI(
     title="CAN-Sentinel IDS Backend",
+    lifespan=lifespan,
     version=BACKEND_VERSION,
     description="FastAPI service for CAN-Sentinel automotive intrusion detection system",
 )
@@ -105,6 +115,10 @@ response_replays = {}
 class AnalyzeCaptureRequest(BaseModel):
     capture_path: str
     origin: Optional[Literal["preset", "path"]] = "preset"
+
+
+class StartAttackRequest(BaseModel):
+    mode: Literal[1, 2] = 1
 
 
 def check_interface_state(iface_name: str = "vcan0") -> str:
@@ -449,6 +463,52 @@ def get_stored_incident(analysis_id: str, incident_id: str):
         detail="Incident not found in this analysis.",
     )
 
+def process_live_incident_automatically(
+    analysis_id: str,
+    incident_id: str,
+) -> Dict[str, Any]:
+    """Run the existing offline response workflow for a registered incident."""
+
+    plan = plan_incident_response(analysis_id, incident_id)
+
+    activation = activate_incident_response(
+        analysis_id,
+        incident_id,
+    )
+
+    if activation.get("status") == "REVIEW_REQUIRED":
+        return {
+            "status": "REVIEW_REQUIRED",
+            "plan": plan,
+            "activation": activation,
+        }
+
+    if activation.get("status") != "SIMULATED_ACTIVE":
+        return {
+            "status": activation.get("status", "ACTIVATION_FAILED"),
+            "plan": plan,
+            "activation": activation,
+        }
+
+    verification = verify_incident_recovery(
+        analysis_id,
+        incident_id,
+    )
+
+    return {
+        "status": verification.get("status", "VERIFICATION_UNKNOWN"),
+        "plan": plan,
+        "activation": activation,
+        "verification": verification,
+    }
+
+
+# Attach only after all response functions have been defined.
+live_manager.set_incident_handler(
+    process_live_incident_automatically
+)
+
+
 @app.post("/api/analyses/upload")
 async def upload_capture(file: UploadFile = File(...)):
     """Upload a CAN sniffer CSV file, validate schema, and run model scoring."""
@@ -523,6 +583,28 @@ def start_live_capture():
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Could not start live capture: {exc}",
+        )
+
+
+@app.post("/api/live/{session_id}/attack")
+def start_live_attack(session_id: str, request: StartAttackRequest):
+    """Start a backend-owned attack simulator on isolated vcan0."""
+    try:
+        return live_manager.start_attack(session_id, mode=request.mode)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        )
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
         )
 
 

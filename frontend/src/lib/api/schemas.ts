@@ -220,6 +220,25 @@ export type AnalysisResult = z.infer<typeof AnalysisResult>;
 export const LiveState = z.enum(["capturing", "stopping", "stopped", "error"]);
 export type LiveState = z.infer<typeof LiveState>;
 
+export const LiveAttack = z.object({
+  state: z.string(),
+  mode: z.number().optional(),
+  pid: z.number().optional(),
+  return_code: z.number().nullable().optional(),
+});
+export const LiveRecovery = z.object({
+  state: z.string(),
+  normal_windows: z.number().optional(),
+  required_normal_windows: z.number().optional(),
+  stopped_after_window_index: z.number().nullable().optional(),
+});
+export const LiveAttackResult = z.object({
+  mode: z.number(),
+  pid: z.number(),
+  state: z.string(),
+});
+export type LiveAttackResult = z.infer<typeof LiveAttackResult>;
+
 export const LiveSession = z.object({
   id: z.string(),
   data_source: DataSource,
@@ -233,6 +252,9 @@ export const LiveSession = z.object({
   /** Newest, possibly incomplete window that is not scored yet. */
   pending_window_index: z.number().nullable(),
   message: z.string().nullable(),
+  incidents: z.array(z.unknown()).optional(),
+  attack: LiveAttack.optional(),
+  recovery: LiveRecovery.optional(),
 });
 export type LiveSession = z.infer<typeof LiveSession>;
 
