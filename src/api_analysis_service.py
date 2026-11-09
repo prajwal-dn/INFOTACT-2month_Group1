@@ -443,5 +443,19 @@ class ApiAnalysisService:
             })
         return summaries
 
+    def list_all_incidents(self) -> List[Dict[str, Any]]:
+        """List all incidents across all stored analyses in reverse chronological order."""
+        incidents = []
+        for a in reversed(list(self._analyses.values())):
+            for inc in a.get("incidents", []):
+                item = deepcopy(inc)
+                item["analysis_id"] = a["id"]
+                item["capture_file"] = a.get("capture_file")
+                item["data_source"] = a.get("data_source")
+                item["origin"] = a.get("origin")
+                item["created_at"] = a.get("created_at")
+                incidents.append(item)
+        return incidents
+
     def get_report_csv_path(self, aid: str) -> Optional[Path]:
         return self._report_files.get(aid)

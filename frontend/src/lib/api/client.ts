@@ -6,6 +6,7 @@ import type {
  AnalysisResult,
   AnalysisSummary,
   CapturePreset,
+  LiveIncident,
   LiveSession,
   LiveAttackResult,
   LiveNormalResult,
@@ -21,6 +22,8 @@ export interface ApiClient {
   listPresets(): Promise<CapturePreset[]>;
   listAnalyses(): Promise<AnalysisSummary[]>;
   getAnalysis(id: string): Promise<AnalysisResult>;
+  /** List all confirmed incidents across every stored analysis (live and offline). */
+  listAllIncidents(): Promise<LiveIncident[]>;
   /** Analyse a capture file that already exists on the backend host. */
   analyzeCapture(input: { capture_path: string; origin?: "preset" | "path" }): Promise<AnalysisResult>;
   /** Upload a sniffer CSV for the backend to validate and score. */

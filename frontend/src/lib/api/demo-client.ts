@@ -12,6 +12,7 @@ import {
   type CapturePreset,
   type FrequencyRow,
   type InferenceWindow,
+  type LiveIncident,
   type LiveSession,
   type ModelInfo,
   type SystemStatus,
@@ -259,6 +260,21 @@ export function createDemoClient(): ApiClient {
     async listAnalyses() {
       await wait(200);
       return [...analyses.values()].map(summarize).sort((a, b) => b.created_at.localeCompare(a.created_at));
+    },
+    async listAllIncidents(): Promise<LiveIncident[]> {
+      await wait(200);
+      const result: LiveIncident[] = [];
+      for (const a of analyses.values()) {
+        for (const inc of a.incidents ?? []) {
+          result.push({
+            ...inc,
+            analysis_id: a.id,
+            analysis_registered: true,
+            response_state: "REGISTERED",
+          });
+        }
+      }
+      return result.reverse();
     },
     async getAnalysis(id) {
       await wait(200);

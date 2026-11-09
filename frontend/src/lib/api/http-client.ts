@@ -12,6 +12,7 @@ import {
   AnalysisSummary,
   ApiErrorBody,
   CapturePreset,
+  LiveIncident,
   LiveSession,
   LiveAttackResult,
   LiveNormalResult,
@@ -79,6 +80,7 @@ export function createHttpClient(baseUrl: string, fetchImpl: typeof fetch = fetc
     listPresets: () => json(z.array(CapturePreset), endpoints.presets()),
     listAnalyses: () => json(z.array(AnalysisSummary), endpoints.analyses()),
     getAnalysis: (id) => json(AnalysisResult, endpoints.analysis(id)),
+    listAllIncidents: () => json(z.array(LiveIncident), endpoints.incidents()),
     analyzeCapture: (input) => json(AnalysisResult, endpoints.analyses(), post(input)),
     uploadCapture: (file) => {
       const form = new FormData();

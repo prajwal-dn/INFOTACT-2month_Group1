@@ -13,6 +13,8 @@ import { ThreatChart } from "@/components/app/ThreatChart";
 import { SecurityAlertModal } from "@/components/app/SecurityAlertModal";
 import { SecurityEventTimeline } from "@/components/app/SecurityEventTimeline";
 import { AttackPreventionAnalytics } from "@/components/app/AttackPreventionAnalytics";
+import { IncidentReportModal } from "@/components/app/IncidentReportModal";
+import { IncidentHistoryTable } from "@/components/app/IncidentHistoryTable";
 import { useSecurityTimeline } from "@/lib/use-security-timeline";
 import { useAttackAnalytics } from "@/lib/use-attack-analytics";
 import { logEvent } from "@/lib/audit-log";
@@ -21,6 +23,7 @@ import { useBackendConfig } from "@/lib/api";
 import { BusActivityWave } from "@/components/app/BusActivityWave";
 import { setActiveLiveSession } from "@/lib/live-session-store";
 import {
+  useAllIncidents,
   useLiveSession,
   useStartLive,
   useStartLiveAttack,
@@ -68,6 +71,11 @@ function LiveMonitor() {
   const [acknowledgedIncidents, setAcknowledgedIncidents] = useState<Set<string>>(() => new Set());
   const [activeIncident, setActiveIncident] = useState<LiveIncident | null>(null);
   const [isAlertModalOpen, setIsAlertModalOpen] = useState(false);
+
+  // Phase 5: Detailed Incident Investigation Report modal state
+  const [selectedReportIncident, setSelectedReportIncident] = useState<LiveIncident | null>(null);
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const allIncidents = useAllIncidents();
 
   useEffect(() => setActiveLiveSession(capturing && sessionId ? sessionId : null), [capturing, sessionId]);
   const ready = checksFor(status.data).every((c) => c.ok || c.demo);
@@ -423,19 +431,35 @@ function LiveMonitor() {
                   </div>
                 </div>
               </div>
-              <Button
-                size="sm"
-                variant="destructive"
-                onClick={() => {
-                  const last = confirmedIncidents[confirmedIncidents.length - 1];
-                  if (last) {
-                    setActiveIncident(last);
-                    setIsAlertModalOpen(true);
-                  }
-                }}
-              >
-                View SOC Alert
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-xs"
+                  onClick={() => {
+                    const last = confirmedIncidents[confirmedIncidents.length - 1];
+                    if (last) {
+                      setSelectedReportIncident(last);
+                      setIsReportModalOpen(true);
+                    }
+                  }}
+                >
+                  Investigation Report
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => {
+                    const last = confirmedIncidents[confirmedIncidents.length - 1];
+                    if (last) {
+                      setActiveIncident(last);
+                      setIsAlertModalOpen(true);
+                    }
+                  }}
+                >
+                  View SOC Alert
+                </Button>
+              </div>
             </div>
           )}
 
@@ -490,6 +514,20 @@ function LiveMonitor() {
           <AttackPreventionAnalytics analytics={attackAnalytics} capturing={capturing} />
 
           <SecurityEventTimeline events={timelineEvents} capturing={capturing} />
+
+          <Panel
+            title="Incident History & Investigation Reports"
+            aside={
+              <span className="text-xs text-muted-foreground">
+                {confirmedIncidents.length + (allIncidents.data?.length ?? 0)} total incidents recorded
+              </span>
+            }
+          >
+            <IncidentHistoryTable
+              liveIncidents={confirmedIncidents}
+              historicIncidents={allIncidents.data ?? []}
+            />
+          </Panel>
         </div>
       </div>
 
@@ -499,6 +537,16 @@ function LiveMonitor() {
         isOpen={isAlertModalOpen}
         onClose={handleCloseAlertModal}
         onOpenAnalysis={handleOpenAnalysis}
+        onOpenReport={(inc) => {
+          setSelectedReportIncident(inc);
+          setIsReportModalOpen(true);
+        }}
+      />
+
+      <IncidentReportModal
+        incident={selectedReportIncident}
+        isOpen={isReportModalOpen}
+        onClose={() => setIsReportModalOpen(false)}
       />
     </div>
   );

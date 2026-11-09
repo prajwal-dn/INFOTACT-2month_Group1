@@ -23,6 +23,15 @@ export function useAnalyses() {
   return useQuery({ queryKey: [...scope, "analyses"], queryFn: () => client.listAnalyses(), retry: 0 });
 }
 
+export function useAllIncidents() {
+  const { client, scope } = useApi();
+  return useQuery({
+    queryKey: [...scope, "all-incidents"],
+    queryFn: () => client.listAllIncidents(),
+    retry: 0,
+  });
+}
+
 export function useAnalysis(id: string | undefined) {
   const { client, scope } = useApi();
   return useQuery({

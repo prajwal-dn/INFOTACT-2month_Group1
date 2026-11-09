@@ -7,6 +7,7 @@ import {
   ChevronUp,
   Clock,
   ExternalLink,
+  FileText,
   Loader2,
   Radio,
   ShieldAlert,
@@ -33,6 +34,7 @@ interface SecurityAlertModalProps {
   isOpen: boolean;
   onClose: () => void;
   onOpenAnalysis: (analysisId: string) => void;
+  onOpenReport?: (incident: LiveIncident) => void;
 }
 
 export function getAttackClassification(incident: LiveIncident): {
@@ -87,6 +89,7 @@ export function SecurityAlertModal({
   isOpen,
   onClose,
   onOpenAnalysis,
+  onOpenReport,
 }: SecurityAlertModalProps) {
   const [showRawFeatures, setShowRawFeatures] = useState(false);
 
@@ -421,19 +424,35 @@ export function SecurityAlertModal({
             Acknowledge &amp; Dismiss Alert
           </Button>
 
-          {incident.analysis_id && (
-            <Button
-              variant="default"
-              className="w-full sm:w-auto bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => {
-                onClose();
-                onOpenAnalysis(incident.analysis_id!);
-              }}
-            >
-              <ExternalLink className="mr-1.5 size-4" />
-              Open Full Incident Dossier ({incident.incident_id})
-            </Button>
-          )}
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            {onOpenReport && (
+              <Button
+                variant="secondary"
+                className="w-full sm:w-auto gap-1.5"
+                onClick={() => {
+                  onClose();
+                  onOpenReport(incident);
+                }}
+              >
+                <FileText className="size-4" />
+                View Investigation Report
+              </Button>
+            )}
+
+            {incident.analysis_id && (
+              <Button
+                variant="default"
+                className="w-full sm:w-auto bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                onClick={() => {
+                  onClose();
+                  onOpenAnalysis(incident.analysis_id!);
+                }}
+              >
+                <ExternalLink className="mr-1.5 size-4" />
+                Open Full Incident Dossier ({incident.incident_id})
+              </Button>
+            )}
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

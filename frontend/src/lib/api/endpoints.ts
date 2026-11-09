@@ -6,6 +6,7 @@ export const endpoints = {
   analysis: (id: string) => `/api/analyses/${encodeURIComponent(id)}`,
   upload: () => "/api/analyses/upload",
   report: (id: string) => `/api/analyses/${encodeURIComponent(id)}/report.csv`,
+  incidents: () => "/api/incidents",
   liveStart: () => "/api/live/start",
   live: (id: string) => `/api/live/${encodeURIComponent(id)}`,
   liveStop: (id: string) => `/api/live/${encodeURIComponent(id)}/stop`,

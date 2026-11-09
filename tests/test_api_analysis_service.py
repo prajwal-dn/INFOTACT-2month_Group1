@@ -94,3 +94,36 @@ def test_multiple_windows_exclude_only_final_window(tmp_path):
     assert result["windows_scored"] == 2
     assert [w["window_index"] for w in result["windows"]] == [0, 1]
     assert result["excluded_partial_window"] == 2
+
+
+def test_list_all_incidents_aggregates_across_analyses(tmp_path):
+    service = ApiAnalysisService(reports_dir=tmp_path)
+    incident_data = {
+        "incident_id": "INC-0001",
+        "severity": "HIGH",
+        "status": "OPEN",
+        "start_window": 0,
+        "end_window": 1,
+        "window_count": 2,
+        "start_time_utc": "2026-11-10T00:00:00Z",
+        "end_time_utc": "2026-11-10T00:00:02Z",
+        "affected_can_ids": ["0x100"],
+        "reasons": [],
+        "windows": [],
+        "summary": "High frequency flood",
+    }
+    records = [{"timestamp_ns": 1, "can_id": "0x100", "dlc": 8, "payload": "00", "is_extended": False, "frame_format": "Standard"}]
+
+    service.register_live_incident(
+        analysis_id="analysis_1",
+        incident=incident_data,
+        records=records,
+        capture_name="test_live.csv",
+    )
+
+    incidents = service.list_all_incidents()
+    assert len(incidents) == 1
+    assert incidents[0]["incident_id"] == "INC-0001"
+    assert incidents[0]["analysis_id"] == "analysis_1"
+    assert incidents[0]["capture_file"] == "test_live.csv"
+

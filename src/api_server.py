@@ -222,6 +222,12 @@ def list_analyses():
     return analysis_service.list_analyses()
 
 
+@app.get("/api/incidents")
+def list_all_incidents():
+    """List all confirmed incidents across every stored analysis (live and offline) in reverse chronological order."""
+    return analysis_service.list_all_incidents()
+
+
 @app.post("/api/analyses")
 def analyze_capture(req: AnalyzeCaptureRequest):
     """Score a capture file located on the backend host."""
