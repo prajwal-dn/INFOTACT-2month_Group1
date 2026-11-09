@@ -2,13 +2,19 @@
  * Phase 4 — Attack Prevention Analytics Tests
  *
  * Tests the pure `deriveAnalytics` function in isolation (no React needed).
- * All test sessions are constructed from actual LiveSession shape.
- * No values are hardcoded or fabricated — every assertion verifies that
- * the hook reads from real session fields.
+ * Covers:
+ * 1. Persistent session attack history & repeated attacks.
+ * 2. Mixed attack modes (Mode 1 and Mode 2 attributed independently).
+ * 3. Normal traffic interruptions (measured strictly via termination reason/crash;
+ *    manual stops are NOT interruptions).
+ * 4. Successful vs failed termination verification (exit code confirmed).
+ * 5. Millisecond response latency calculations.
+ * 6. Estimated frame attribution (0x100 shared).
+ * 7. Ground truth unavailability for false positives.
  */
 import { describe, it, expect } from "vitest";
 import { deriveAnalytics } from "@/lib/use-attack-analytics";
-import type { LiveSession } from "@/lib/api/schemas";
+import type { LiveSession, LiveAttackRecord, LiveNormalRecord } from "@/lib/api/schemas";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -71,8 +77,16 @@ function makeIncident(
   startW: number,
   endW: number,
   severity: "HIGH" | "MEDIUM" | "REVIEW" = "HIGH",
-  responseState = "REGISTERED",
-  registered = true
+  latency?: {
+    first_anomalous_window_utc?: string;
+    incident_confirmed_utc?: string;
+    response_initiated_utc?: string;
+    attack_terminated_utc?: string;
+    detection_to_termination_ms?: number;
+    detection_ms?: number;
+    mitigation_ms?: number;
+    attack_mode?: number;
+  }
 ) {
   return {
     incident_id: id,
@@ -88,8 +102,9 @@ function makeIncident(
     summary: "Test incident",
     windows: [],
     analysis_id: `analysis_${id}`,
-    analysis_registered: registered,
-    response_state: responseState,
+    analysis_registered: true,
+    response_state: "REGISTERED",
+    response_latency: latency,
   };
 }
 
@@ -108,6 +123,8 @@ function makeSession(overrides: Partial<LiveSession> = {}): LiveSession {
     message: null,
     normal: { state: "NOT_STARTED" },
     attack: { state: "NOT_STARTED" },
+    attack_history: [],
+    normal_history: [],
     recovery: { state: "NOT_STARTED", normal_windows: 0, required_normal_windows: 2 },
     ...overrides,
   } as LiveSession;
@@ -116,17 +133,19 @@ function makeSession(overrides: Partial<LiveSession> = {}): LiveSession {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe("deriveAnalytics — empty / idle session", () => {
-  it("returns all zeros when session is undefined", () => {
+  it("returns clean empty structure when session is undefined", () => {
     const a = deriveAnalytics(undefined);
     expect(a.totalAttackAttempts).toBe(0);
     expect(a.totalAttacksDetected).toBe(0);
     expect(a.successfulTerminations).toBe(0);
     expect(a.failedTerminations).toBe(0);
+    expect(a.avgResponseLatencyMs).toBeNull();
     expect(a.trafficTimeSeries).toHaveLength(0);
     expect(a.latencyPoints).toHaveLength(0);
+    expect(a.falsePositiveStatus).toBe("UNAVAILABLE");
   });
 
-  it("returns all zeros for a session with no attack", () => {
+  it("returns all zeros for an idle session with no traffic", () => {
     const a = deriveAnalytics(makeSession());
     expect(a.totalAttackAttempts).toBe(0);
     expect(a.totalAttacksDetected).toBe(0);
@@ -134,364 +153,184 @@ describe("deriveAnalytics — empty / idle session", () => {
   });
 });
 
-describe("deriveAnalytics — attack attempt counting", () => {
-  it("counts 1 attempt when attack.state=RUNNING", () => {
-    const s = makeSession({ attack: { state: "RUNNING", mode: 1, pid: 1234 } });
-    expect(deriveAnalytics(s).totalAttackAttempts).toBe(1);
-    expect(deriveAnalytics(s).currentAttackMode).toBe(1);
-  });
-
-  it("counts 1 attempt when attack.state=STOPPED", () => {
-    const s = makeSession({ attack: { state: "STOPPED", mode: 1, return_code: 0 } });
-    expect(deriveAnalytics(s).totalAttackAttempts).toBe(1);
-  });
-
-  it("counts 0 attempts when attack.state=NOT_STARTED", () => {
-    const s = makeSession({ attack: { state: "NOT_STARTED" } });
-    expect(deriveAnalytics(s).totalAttackAttempts).toBe(0);
-  });
-});
-
-describe("deriveAnalytics — detection counting from confirmed incidents", () => {
-  it("counts 0 detected when only anomaly windows exist but no confirmed incident", () => {
-    const s = makeSession({
-      windows: [makeWindow(0, "ANOMALY", 0.9), makeWindow(1, "ANOMALY", 0.85)],
-      attack: { state: "RUNNING", mode: 1, pid: 123 },
-    });
+describe("deriveAnalytics — persistent per-session attack history & repeated attacks", () => {
+  it("counts multiple attack attempts from session attack_history", () => {
+    const attackHistory: LiveAttackRecord[] = [
+      { attack_id: "att_1", mode: 1, pid: 101, state: "STOPPED", started_at: ts(0), stopped_at: ts(2), return_code: 0, termination_reason: "AUTOMATIC_RESPONSE" },
+      { attack_id: "att_2", mode: 2, pid: 102, state: "STOPPED", started_at: ts(5), stopped_at: ts(7), return_code: 0, termination_reason: "AUTOMATIC_RESPONSE" },
+      { attack_id: "att_3", mode: 1, pid: 103, state: "RUNNING", started_at: ts(10), stopped_at: null, return_code: null, termination_reason: null },
+    ];
+    const s = makeSession({ attack_history: attackHistory });
     const a = deriveAnalytics(s);
-    expect(a.totalAttacksDetected).toBe(0);
-    expect(a.hasIncidents).toBe(false);
-    // The 2 anomaly windows not part of an incident are unconfirmed
-    expect(a.unconfirmedAnomalyWindows).toBe(2);
+
+    expect(a.totalAttackAttempts).toBe(3);
+    expect(a.mode1Stats.attempts).toBe(2);
+    expect(a.mode2Stats.attempts).toBe(1);
+    // att_1 and att_2 stopped cleanly; att_3 still running
+    expect(a.successfulTerminations).toBe(2);
+    expect(a.failedTerminations).toBe(0);
   });
 
-  it("counts 1 detection from a confirmed backend incident", () => {
+  it("handles mixed attack modes and attributes stats independently", () => {
+    const attackHistory: LiveAttackRecord[] = [
+      { attack_id: "att_1", mode: 1, pid: 201, state: "STOPPED", started_at: ts(0), stopped_at: ts(2), return_code: 0, termination_reason: "AUTOMATIC_RESPONSE" },
+      { attack_id: "att_2", mode: 1, pid: 202, state: "STOPPED", started_at: ts(5), stopped_at: ts(7), return_code: 1, termination_reason: "PROCESS_CRASH" },
+      { attack_id: "att_3", mode: 2, pid: 203, state: "STOPPED", started_at: ts(10), stopped_at: ts(12), return_code: 0, termination_reason: "AUTOMATIC_RESPONSE" },
+    ];
     const s = makeSession({
-      windows: [makeWindow(0, "ANOMALY", 0.9), makeWindow(1, "ANOMALY", 0.85)],
-      incidents: [makeIncident("INC-0001", 0, 1)],
-      attack: { state: "STOPPED", mode: 1, return_code: 0 },
-    });
-    const a = deriveAnalytics(s);
-    expect(a.totalAttacksDetected).toBe(1);
-    expect(a.hasIncidents).toBe(true);
-    expect(a.unconfirmedAnomalyWindows).toBe(0);
-  });
-
-  it("counts 2 detections from 2 confirmed incidents", () => {
-    const s = makeSession({
-      windows: [
-        makeWindow(0, "ANOMALY", 0.9),
-        makeWindow(1, "ANOMALY", 0.85),
-        makeWindow(5, "ANOMALY", 0.92),
-        makeWindow(6, "ANOMALY", 0.88),
+      attack_history: attackHistory,
+      incidents: [
+        makeIncident("INC-0001", 0, 1, "HIGH", { detection_to_termination_ms: 1200, attack_mode: 1 }),
+        makeIncident("INC-0002", 10, 11, "HIGH", { detection_to_termination_ms: 850, attack_mode: 2 }),
       ],
-      incidents: [makeIncident("INC-0001", 0, 1), makeIncident("INC-0002", 5, 6)],
-      attack: { state: "STOPPED", mode: 1, return_code: 0 },
     });
-    expect(deriveAnalytics(s).totalAttacksDetected).toBe(2);
+    const a = deriveAnalytics(s);
+
+    expect(a.totalAttackAttempts).toBe(3);
+    expect(a.mode1Stats.attempts).toBe(2);
+    expect(a.mode1Stats.successfulTerminations).toBe(1);
+    expect(a.mode1Stats.failedTerminations).toBe(1);
+    expect(a.mode1Stats.detected).toBe(1);
+    expect(a.mode1Stats.avgLatencyMs).toBe(1200);
+
+    expect(a.mode2Stats.attempts).toBe(1);
+    expect(a.mode2Stats.successfulTerminations).toBe(1);
+    expect(a.mode2Stats.failedTerminations).toBe(0);
+    expect(a.mode2Stats.detected).toBe(1);
+    expect(a.mode2Stats.avgLatencyMs).toBe(850);
   });
 });
 
-describe("deriveAnalytics — termination success/failure", () => {
-  it("counts successful termination when attack.return_code=0", () => {
+describe("deriveAnalytics — normal traffic interruptions", () => {
+  it("does NOT count manual user stop as an interruption", () => {
+    const normalHistory: LiveNormalRecord[] = [
+      { normal_id: "norm_1", pid: 301, state: "STOPPED", started_at: ts(0), stopped_at: ts(10), return_code: 0, termination_reason: "MANUAL_USER_STOP" },
+    ];
     const s = makeSession({
-      incidents: [makeIncident("INC-0001", 0, 1)],
-      attack: { state: "STOPPED", mode: 1, return_code: 0 },
+      normal_history: normalHistory,
+      incidents: [makeIncident("INC-0001", 1, 2)],
     });
+    const a = deriveAnalytics(s);
+    expect(a.normalTrafficInterruptions).toBe(0);
+  });
+
+  it("does NOT count stop-all simulations or session stop as an interruption", () => {
+    const normalHistory: LiveNormalRecord[] = [
+      { normal_id: "norm_1", pid: 302, state: "STOPPED", started_at: ts(0), stopped_at: ts(5), return_code: 0, termination_reason: "MANUAL_USER_STOP_ALL" },
+      { normal_id: "norm_2", pid: 303, state: "STOPPED", started_at: ts(6), stopped_at: ts(10), return_code: 0, termination_reason: "SESSION_STOP" },
+    ];
+    const s = makeSession({ normal_history: normalHistory });
+    expect(deriveAnalytics(s).normalTrafficInterruptions).toBe(0);
+  });
+
+  it("counts process crash or abnormal exit as an interruption", () => {
+    const normalHistory: LiveNormalRecord[] = [
+      { normal_id: "norm_1", pid: 304, state: "STOPPED", started_at: ts(0), stopped_at: ts(4), return_code: 139, termination_reason: "PROCESS_CRASH" },
+    ];
+    const s = makeSession({ normal_history: normalHistory });
+    expect(deriveAnalytics(s).normalTrafficInterruptions).toBe(1);
+  });
+});
+
+describe("deriveAnalytics — termination confirmation", () => {
+  it("only counts successful termination when process exit is confirmed", () => {
+    const attackHistory: LiveAttackRecord[] = [
+      { attack_id: "att_1", mode: 1, pid: 401, state: "STOPPED", started_at: ts(0), stopped_at: ts(2), return_code: 0, termination_reason: "AUTOMATIC_RESPONSE" },
+    ];
+    const s = makeSession({ attack_history: attackHistory });
     const a = deriveAnalytics(s);
     expect(a.successfulTerminations).toBe(1);
     expect(a.failedTerminations).toBe(0);
   });
 
-  it("counts successful termination when attack.return_code=null (SIGINT clean exit)", () => {
-    const s = makeSession({
-      incidents: [makeIncident("INC-0001", 0, 1)],
-      attack: { state: "STOPPED", mode: 1, return_code: null },
-    });
-    const a = deriveAnalytics(s);
-    expect(a.successfulTerminations).toBe(1);
-    expect(a.failedTerminations).toBe(0);
-  });
-
-  it("counts failed termination when attack.return_code=1", () => {
-    const s = makeSession({
-      incidents: [makeIncident("INC-0001", 0, 1)],
-      attack: { state: "STOPPED", mode: 2, return_code: 1 },
-    });
+  it("counts failed termination when exit code is non-zero", () => {
+    const attackHistory: LiveAttackRecord[] = [
+      { attack_id: "att_1", mode: 1, pid: 402, state: "STOPPED", started_at: ts(0), stopped_at: ts(2), return_code: 1, termination_reason: "TERMINATION_FAILED" },
+    ];
+    const s = makeSession({ attack_history: attackHistory });
     const a = deriveAnalytics(s);
     expect(a.successfulTerminations).toBe(0);
     expect(a.failedTerminations).toBe(1);
   });
 
-  it("does NOT count a termination when attack is still RUNNING", () => {
-    const s = makeSession({
-      incidents: [makeIncident("INC-0001", 0, 1)],
-      attack: { state: "RUNNING", mode: 1, pid: 123 },
-    });
-    const a = deriveAnalytics(s);
-    expect(a.successfulTerminations).toBe(0);
-    expect(a.failedTerminations).toBe(0);
-  });
-
-  it("does NOT count termination merely because an incident was detected", () => {
-    // Incident confirmed but attack still running — no termination yet
-    const s = makeSession({
-      incidents: [makeIncident("INC-0001", 0, 1, "HIGH", "QUEUED", false)],
-      attack: { state: "RUNNING", mode: 1, pid: 456 },
-    });
+  it("does NOT count termination while attack process is still running", () => {
+    const attackHistory: LiveAttackRecord[] = [
+      { attack_id: "att_1", mode: 1, pid: 403, state: "RUNNING", started_at: ts(0), stopped_at: null, return_code: null, termination_reason: null },
+    ];
+    const s = makeSession({ attack_history: attackHistory });
     const a = deriveAnalytics(s);
     expect(a.successfulTerminations).toBe(0);
     expect(a.failedTerminations).toBe(0);
   });
 });
 
-describe("deriveAnalytics — normal traffic interruptions", () => {
-  it("counts 0 interruptions when normal generator never ran", () => {
-    const s = makeSession({ normal: { state: "NOT_STARTED" } });
-    expect(deriveAnalytics(s).normalTrafficInterruptions).toBe(0);
+describe("deriveAnalytics — response latency in milliseconds", () => {
+  it("uses pre-computed backend millisecond latency when available", () => {
+    const s = makeSession({
+      incidents: [
+        makeIncident("INC-0001", 0, 1, "HIGH", {
+          first_anomalous_window_utc: "2026-11-10T10:00:00.000Z",
+          incident_confirmed_utc: "2026-11-10T10:00:02.000Z",
+          response_initiated_utc: "2026-11-10T10:00:02.050Z",
+          attack_terminated_utc: "2026-11-10T10:00:02.150Z",
+          detection_to_termination_ms: 2150,
+          detection_ms: 2000,
+          mitigation_ms: 100,
+          attack_mode: 1,
+        }),
+      ],
+    });
+    const a = deriveAnalytics(s);
+    expect(a.avgResponseLatencyMs).toBe(2150);
+    expect(a.latencyPoints[0]?.detectionToTerminationMs).toBe(2150);
+    expect(a.latencyPoints[0]?.detectionMs).toBe(2000);
+    expect(a.latencyPoints[0]?.mitigationMs).toBe(100);
   });
 
-  it("counts 0 interruptions when normal stopped but no incidents occurred", () => {
+  it("calculates latency in ms from timestamps when pre-computed value is omitted", () => {
     const s = makeSession({
-      normal: { state: "STOPPED", return_code: 0 },
+      incidents: [
+        makeIncident("INC-0001", 0, 1, "HIGH", {
+          first_anomalous_window_utc: "2026-11-10T10:00:00.000Z",
+          incident_confirmed_utc: "2026-11-10T10:00:02.000Z",
+          response_initiated_utc: "2026-11-10T10:00:02.050Z",
+          attack_terminated_utc: "2026-11-10T10:00:03.500Z",
+          attack_mode: 2,
+        }),
+      ],
+    });
+    const a = deriveAnalytics(s);
+    expect(a.avgResponseLatencyMs).toBe(3500);
+    expect(a.latencyPoints[0]?.detectionToTerminationMs).toBe(3500);
+  });
+});
+
+describe("deriveAnalytics — frame attribution & ground truth", () => {
+  it("flags frame attribution as estimated due to shared 0x100", () => {
+    const s = makeSession({
+      windows: [
+        makeWindow(0, "NORMAL", 0.05, 90),
+        makeWindow(1, "ANOMALY", 0.95, 30, "0x100_flood", 500),
+      ],
+    });
+    const a = deriveAnalytics(s);
+    expect(a.isFrameAttributionEstimated).toBe(true);
+    expect(a.trafficTimeSeries[0]?.isEstimated).toBe(true);
+    expect(a.estimatedNormalFramesDuringAttack).toBe(30);
+  });
+
+  it("labels false positives as UNAVAILABLE without fabricating ground truth", () => {
+    const s = makeSession({
+      windows: [
+        makeWindow(0, "NORMAL", 0.05),
+        makeWindow(1, "ANOMALY", 0.88), // single window anomaly (no incident)
+        makeWindow(2, "NORMAL", 0.04),
+      ],
       incidents: [],
     });
-    expect(deriveAnalytics(s).normalTrafficInterruptions).toBe(0);
-  });
-
-  it("counts 1 interruption when normal.state=STOPPED AND incidents occurred", () => {
-    const s = makeSession({
-      normal: { state: "STOPPED", return_code: 0 },
-      incidents: [makeIncident("INC-0001", 0, 1)],
-      attack: { state: "STOPPED", mode: 1, return_code: 0 },
-    });
-    expect(deriveAnalytics(s).normalTrafficInterruptions).toBe(1);
-  });
-});
-
-describe("deriveAnalytics — normal frames during attack / after mitigation", () => {
-  it("counts normal frames from known IDs within anomalous windows", () => {
-    const s = makeSession({
-      windows: [
-        // Anomaly window with 90 normal frames + 500 flood frames
-        makeWindow(0, "ANOMALY", 0.95, 90, "0x100_flood", 500),
-        makeWindow(1, "ANOMALY", 0.92, 60, "0x100_flood", 400),
-      ],
-      incidents: [makeIncident("INC-0001", 0, 1)],
-      attack: { state: "STOPPED", mode: 1, return_code: 0 },
-      recovery: {
-        state: "RECOVERED",
-        normal_windows: 2,
-        required_normal_windows: 2,
-        stopped_after_window_index: 1,
-      },
-    });
     const a = deriveAnalytics(s);
-    // 90 + 60 = 150 normal frames across the 2 anomaly windows
-    expect(a.normalFramesDuringAttack).toBe(150);
-    expect(a.normalFramesAfterMitigation).toBe(0); // no windows after index 1 yet
-  });
-
-  it("counts normal frames after mitigation (windows after stopped_after_window_index)", () => {
-    const s = makeSession({
-      windows: [
-        makeWindow(0, "ANOMALY", 0.95, 30),
-        makeWindow(1, "ANOMALY", 0.92, 30),
-        makeWindow(2, "NORMAL", 0.1, 90),   // post-attack normal window
-        makeWindow(3, "NORMAL", 0.08, 90),  // post-attack normal window
-      ],
-      incidents: [makeIncident("INC-0001", 0, 1)],
-      attack: { state: "STOPPED", mode: 1, return_code: 0 },
-      recovery: {
-        state: "RECOVERED",
-        normal_windows: 2,
-        required_normal_windows: 2,
-        stopped_after_window_index: 1,
-      },
-    });
-    const a = deriveAnalytics(s);
-    expect(a.normalFramesDuringAttack).toBe(60); // 30+30 from anomaly windows
-    expect(a.normalFramesAfterMitigation).toBe(180); // 90+90 from post-attack windows
-  });
-});
-
-describe("deriveAnalytics — avg detection window count", () => {
-  it("returns null when there are no incidents", () => {
-    const s = makeSession({ windows: [makeWindow(0, "NORMAL", 0.1)] });
-    expect(deriveAnalytics(s).avgDetectionWindowCount).toBeNull();
-  });
-
-  it("returns incident.window_count for a single incident", () => {
-    const s = makeSession({
-      incidents: [makeIncident("INC-0001", 0, 2)], // window_count = 3
-    });
-    expect(deriveAnalytics(s).avgDetectionWindowCount).toBe(3);
-  });
-
-  it("averages window counts across multiple incidents", () => {
-    const s = makeSession({
-      incidents: [
-        makeIncident("INC-0001", 0, 1), // window_count = 2
-        makeIncident("INC-0002", 5, 7), // window_count = 3
-      ],
-    });
-    expect(deriveAnalytics(s).avgDetectionWindowCount).toBe(2.5);
-  });
-});
-
-describe("deriveAnalytics — traffic time series", () => {
-  it("produces one data point per scored window", () => {
-    const s = makeSession({
-      windows: [
-        makeWindow(0, "NORMAL", 0.1),
-        makeWindow(1, "ANOMALY", 0.9, 30, "0x100_flood", 500),
-        makeWindow(2, "NORMAL", 0.05),
-      ],
-    });
-    const a = deriveAnalytics(s);
-    expect(a.trafficTimeSeries).toHaveLength(3);
-    const pt0 = a.trafficTimeSeries[0]!;
-    const pt1 = a.trafficTimeSeries[1]!;
-    expect(pt0.prediction).toBe("NORMAL");
-    expect(pt1.prediction).toBe("ANOMALY");
-    expect(pt1.maliciousFrames).toBe(500);
-    expect(pt1.normalFrames).toBe(30);
-    expect(pt1.totalFrames).toBe(530);
-  });
-
-  it("returns empty array when no windows", () => {
-    expect(deriveAnalytics(makeSession()).trafficTimeSeries).toHaveLength(0);
-  });
-});
-
-describe("deriveAnalytics — latency chart data", () => {
-  it("produces one latency point per confirmed incident", () => {
-    const s = makeSession({
-      incidents: [
-        makeIncident("INC-0001", 0, 1),
-        makeIncident("INC-0002", 5, 6),
-      ],
-      attack: { state: "STOPPED", mode: 1, return_code: 0 },
-    });
-    const a = deriveAnalytics(s);
-    expect(a.latencyPoints).toHaveLength(2);
-    const lp0 = a.latencyPoints[0]!;
-    const lp1 = a.latencyPoints[1]!;
-    expect(lp0.incidentId).toBe("INC-0001");
-    expect(lp0.detectionWindowCount).toBe(2);
-    expect(lp0.attackMode).toBe(1);
-    expect(lp1.incidentId).toBe("INC-0002");
-  });
-
-  it("returns empty when no incidents", () => {
-    expect(deriveAnalytics(makeSession()).latencyPoints).toHaveLength(0);
-  });
-});
-
-describe("deriveAnalytics — per-mode stats", () => {
-  it("attributes incident to mode 1 when attack.mode=1", () => {
-    const s = makeSession({
-      incidents: [makeIncident("INC-0001", 0, 1)],
-      attack: { state: "STOPPED", mode: 1, return_code: 0 },
-      windows: [makeWindow(0, "ANOMALY", 0.95), makeWindow(1, "ANOMALY", 0.9)],
-    });
-    const a = deriveAnalytics(s);
-    expect(a.mode1Stats.attempts).toBe(1);
-    expect(a.mode1Stats.detected).toBe(1);
-    expect(a.mode1Stats.successfulTerminations).toBe(1);
-    expect(a.mode2Stats.attempts).toBe(0);
-  });
-
-  it("attributes incident to mode 2 when attack.mode=2", () => {
-    const s = makeSession({
-      incidents: [makeIncident("INC-0001", 0, 1)],
-      attack: { state: "STOPPED", mode: 2, return_code: 0 },
-    });
-    const a = deriveAnalytics(s);
-    expect(a.mode2Stats.attempts).toBe(1);
-    expect(a.mode2Stats.detected).toBe(1);
-    expect(a.mode1Stats.attempts).toBe(0);
-  });
-
-  it("records peak anomaly score from actual anomaly windows", () => {
-    const s = makeSession({
-      incidents: [makeIncident("INC-0001", 0, 1)],
-      attack: { state: "STOPPED", mode: 1, return_code: 0 },
-      windows: [
-        makeWindow(0, "ANOMALY", 0.72),
-        makeWindow(1, "ANOMALY", 0.91),
-        makeWindow(2, "NORMAL", 0.05),
-      ],
-    });
-    const a = deriveAnalytics(s);
-    expect(a.mode1Stats.peakAnomalyScore).toBeCloseTo(0.91, 2);
-  });
-});
-
-describe("deriveAnalytics — recovery state", () => {
-  it("reports recoveryVerified=false when recovery=NOT_STARTED", () => {
-    const s = makeSession({ recovery: { state: "NOT_STARTED", normal_windows: 0, required_normal_windows: 2 } });
-    expect(deriveAnalytics(s).recoveryVerified).toBe(false);
-  });
-
-  it("reports recoveryVerified=true when recovery.state=RECOVERED", () => {
-    const s = makeSession({
-      recovery: { state: "RECOVERED", normal_windows: 2, required_normal_windows: 2 },
-    });
-    const a = deriveAnalytics(s);
-    expect(a.recoveryVerified).toBe(true);
-    expect(a.verifiedNormalWindows).toBe(2);
-  });
-
-  it("reports recoveryState=ATTACK_STOPPED_VERIFYING while verifying", () => {
-    const s = makeSession({
-      recovery: { state: "ATTACK_STOPPED_VERIFYING", normal_windows: 1, required_normal_windows: 2 },
-    });
-    const a = deriveAnalytics(s);
-    expect(a.recoveryState).toBe("ATTACK_STOPPED_VERIFYING");
-    expect(a.recoveryVerified).toBe(false);
-    expect(a.verifiedNormalWindows).toBe(1);
-  });
-});
-
-describe("deriveAnalytics — multiple attack attempts within session scope", () => {
-  it("handles Mode 1 normal+attack concurrent scenario correctly", () => {
-    const s = makeSession({
-      state: "capturing",
-      windows: [
-        makeWindow(0, "NORMAL", 0.1, 90),   // normal traffic only
-        makeWindow(1, "NORMAL", 0.08, 90),  // normal traffic only
-        makeWindow(2, "ANOMALY", 0.93, 30, "0x100_flood", 1000), // attack started
-        makeWindow(3, "ANOMALY", 0.97, 20, "0x100_flood", 1200),
-        makeWindow(4, "NORMAL", 0.06, 80),  // attack stopped, recovery
-        makeWindow(5, "NORMAL", 0.04, 85),  // recovery confirmed
-      ],
-      incidents: [makeIncident("INC-0001", 2, 3, "HIGH", "REGISTERED", true)],
-      attack: { state: "STOPPED", mode: 1, return_code: 0 },
-      normal: { state: "RUNNING", pid: 9001, interval_ms: 100 },
-      recovery: {
-        state: "RECOVERED",
-        normal_windows: 2,
-        required_normal_windows: 2,
-        stopped_after_window_index: 3,
-      },
-    });
-
-    const a = deriveAnalytics(s);
-    expect(a.totalAttackAttempts).toBe(1);
-    expect(a.totalAttacksDetected).toBe(1);
-    expect(a.successfulTerminations).toBe(1);
-    expect(a.failedTerminations).toBe(0);
-    expect(a.recoveryVerified).toBe(true);
-    // Normal frames during attack (windows 2+3): 30+20 = 50
-    expect(a.normalFramesDuringAttack).toBe(50);
-    // Normal frames after mitigation (windows 4+5, both > stopped_after=3): 80+85 = 165
-    expect(a.normalFramesAfterMitigation).toBe(165);
-    expect(a.normalTrafficInterruptions).toBe(0); // normal still RUNNING
-    expect(a.unconfirmedAnomalyWindows).toBe(0); // all anomaly windows in confirmed incident
-    expect(a.trafficTimeSeries).toHaveLength(6);
-    expect(a.latencyPoints).toHaveLength(1);
-    expect(a.mode1Stats.attempts).toBe(1);
-    expect(a.mode2Stats.attempts).toBe(0);
+    expect(a.falsePositiveStatus).toBe("UNAVAILABLE");
+    expect(a.uncorrelatedAnomalyWindows).toBe(1);
+    expect(a.falsePositiveNote).toContain("unavailable");
   });
 });

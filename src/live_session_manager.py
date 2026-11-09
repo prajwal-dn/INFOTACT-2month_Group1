@@ -150,11 +150,19 @@ class LiveSessionManager:
                 stderr=subprocess.DEVNULL,
             )
 
-            session["attack"] = {
+            started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            attack_record = {
+                "attack_id": f"att_{len(session.setdefault('attack_history', [])) + 1}",
                 "mode": mode,
                 "pid": self._attack_proc.pid,
                 "state": "RUNNING",
+                "started_at": started_at,
+                "stopped_at": None,
+                "return_code": None,
+                "termination_reason": None,
             }
+            session["attack_history"].append(attack_record)
+            session["attack"] = dict(attack_record)
 
             session["recovery"] = {
                 "state": "ATTACK_RUNNING",
@@ -195,14 +203,22 @@ class LiveSessionManager:
                 stderr=subprocess.DEVNULL,
             )
 
-            session["normal"] = {
+            started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            normal_record = {
+                "normal_id": f"norm_{len(session.setdefault('normal_history', [])) + 1}",
                 "pid": self._normal_proc.pid,
                 "state": "RUNNING",
+                "started_at": started_at,
+                "stopped_at": None,
+                "return_code": None,
+                "termination_reason": None,
                 "interval_ms": interval_ms,
             }
+            session["normal_history"].append(normal_record)
+            session["normal"] = dict(normal_record)
             return dict(session["normal"])
 
-    def stop_normal(self, session_id: str) -> Dict[str, Any]:
+    def stop_normal(self, session_id: str, reason: str = "MANUAL_USER_STOP") -> Dict[str, Any]:
         """Stop only the normal traffic generator owned by this manager."""
         with self._lock:
             session = self._active_session
@@ -230,11 +246,21 @@ class LiveSessionManager:
 
             self._normal_proc = None
 
+            stopped_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             session["normal"] = {
                 **session.get("normal", {}),
                 "state": "STOPPED",
+                "stopped_at": stopped_at,
                 "return_code": proc.returncode,
+                "termination_reason": reason,
             }
+            for norm in reversed(session.get("normal_history", [])):
+                if norm.get("state") == "RUNNING" or norm.get("stopped_at") is None:
+                    norm["state"] = "STOPPED"
+                    norm["stopped_at"] = stopped_at
+                    norm["return_code"] = proc.returncode
+                    norm["termination_reason"] = reason
+                    break
             return dict(session["normal"])
 
     def stop_all_simulations(self, session_id: str) -> Dict[str, Any]:
@@ -244,15 +270,15 @@ class LiveSessionManager:
             if not session or session["id"] != session_id:
                 raise ValueError("Live session not found.")
 
-        attack_res = self.stop_attack(session_id)
-        normal_res = self.stop_normal(session_id)
+        attack_res = self.stop_attack(session_id, reason="MANUAL_USER_STOP_ALL")
+        normal_res = self.stop_normal(session_id, reason="MANUAL_USER_STOP_ALL")
 
         return {
             "attack": attack_res,
             "normal": normal_res,
         }
 
-    def stop_attack(self, session_id: str) -> Dict[str, Any]:
+    def stop_attack(self, session_id: str, reason: str = "MANUAL_STOP") -> Dict[str, Any]:
         """Stop only the attack process owned by this manager."""
         with self._lock:
             session = self._active_session
@@ -280,11 +306,21 @@ class LiveSessionManager:
 
             self._attack_proc = None
 
+            stopped_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             session["attack"] = {
                 **session.get("attack", {}),
                 "state": "STOPPED",
+                "stopped_at": stopped_at,
                 "return_code": proc.returncode,
+                "termination_reason": reason,
             }
+            for att in reversed(session.get("attack_history", [])):
+                if att.get("state") == "RUNNING" or att.get("stopped_at") is None:
+                    att["state"] = "STOPPED"
+                    att["stopped_at"] = stopped_at
+                    att["return_code"] = proc.returncode
+                    att["termination_reason"] = reason
+                    break
             session["recovery"] = {
                 "state": "ATTACK_STOPPED_VERIFYING",
                 "normal_windows": 0,
@@ -332,8 +368,40 @@ class LiveSessionManager:
                 if job is None:
                     return
 
+                response_initiated_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
                 # Stop only the attack process launched by this manager.
-                attack_result = self.stop_attack(job["session_id"])
+                attack_result = self.stop_attack(job["session_id"], reason="AUTOMATIC_RESPONSE")
+                attack_terminated_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+                def _parse_utc_iso(ts):
+                    if not ts:
+                        return None
+                    try:
+                        clean = ts.replace("Z", "+00:00")
+                        return datetime.fromisoformat(clean)
+                    except Exception:
+                        return None
+
+                t0 = _parse_utc_iso(job.get("first_anomalous_window_utc"))
+                t1 = _parse_utc_iso(job.get("incident_confirmed_utc"))
+                t2 = _parse_utc_iso(response_initiated_utc)
+                t3 = _parse_utc_iso(attack_terminated_utc)
+
+                detection_ms = round((t1 - t0).total_seconds() * 1000) if (t1 and t0) else None
+                mitigation_ms = round((t3 - t2).total_seconds() * 1000) if (t3 and t2) else None
+                detection_to_termination_ms = round((t3 - t0).total_seconds() * 1000) if (t3 and t0) else None
+
+                latency_info = {
+                    "first_anomalous_window_utc": job.get("first_anomalous_window_utc"),
+                    "incident_confirmed_utc": job.get("incident_confirmed_utc"),
+                    "response_initiated_utc": response_initiated_utc,
+                    "attack_terminated_utc": attack_terminated_utc,
+                    "detection_ms": detection_ms,
+                    "mitigation_ms": mitigation_ms,
+                    "detection_to_termination_ms": detection_to_termination_ms,
+                    "attack_mode": job.get("attack_mode"),
+                }
 
                 self.analysis_service.register_live_incident(
                     analysis_id=job["analysis_id"],
@@ -355,6 +423,7 @@ class LiveSessionManager:
                         for item in session.get("incidents", []):
                             if item.get("analysis_id") == job["analysis_id"]:
                                 item["analysis_registered"] = True
+                                item["response_latency"] = latency_info
                                 item["response_state"] = (
                                     result.get("status", "REGISTERED")
                                     if isinstance(result, dict)
@@ -362,6 +431,12 @@ class LiveSessionManager:
                                 )
                                 if isinstance(result, dict):
                                     item["response_result"] = result
+                                break
+
+                        for att in reversed(session.get("attack_history", [])):
+                            if att.get("state") == "STOPPED" and att.get("termination_reason") == "AUTOMATIC_RESPONSE":
+                                att["incident_id"] = job["incident"]["incident_id"]
+                                att["latency"] = latency_info
                                 break
 
             except Exception as exc:
@@ -388,19 +463,43 @@ class LiveSessionManager:
 
             # Reconcile child processes that exited or crashed independently
             if self._normal_proc is not None and self._normal_proc.poll() is not None:
+                rc = self._normal_proc.returncode
+                reason = "PROCESS_CRASH" if rc != 0 else "NATURAL_EXIT"
+                stopped_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 s["normal"] = {
                     **s.get("normal", {}),
                     "state": "STOPPED",
-                    "return_code": self._normal_proc.returncode,
+                    "stopped_at": stopped_at,
+                    "return_code": rc,
+                    "termination_reason": reason,
                 }
+                for norm in reversed(s.get("normal_history", [])):
+                    if norm.get("state") == "RUNNING":
+                        norm["state"] = "STOPPED"
+                        norm["stopped_at"] = stopped_at
+                        norm["return_code"] = rc
+                        norm["termination_reason"] = reason
+                        break
                 self._normal_proc = None
 
             if self._attack_proc is not None and self._attack_proc.poll() is not None:
+                rc = self._attack_proc.returncode
+                reason = "PROCESS_CRASH" if rc != 0 else "NATURAL_EXIT"
+                stopped_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 s["attack"] = {
                     **s.get("attack", {}),
                     "state": "STOPPED",
-                    "return_code": self._attack_proc.returncode,
+                    "stopped_at": stopped_at,
+                    "return_code": rc,
+                    "termination_reason": reason,
                 }
+                for att in reversed(s.get("attack_history", [])):
+                    if att.get("state") == "RUNNING":
+                        att["state"] = "STOPPED"
+                        att["stopped_at"] = stopped_at
+                        att["return_code"] = rc
+                        att["termination_reason"] = reason
+                        break
                 self._attack_proc = None
 
             # Return snapshot matching Zod LiveSession schema
@@ -416,6 +515,8 @@ class LiveSessionManager:
                 "incidents": list(s.get("incidents", [])),
                 "normal": dict(s.get("normal", {"state": "NOT_STARTED"})),
                 "attack": dict(s.get("attack", {"state": "NOT_STARTED"})),
+                "attack_history": [dict(a) for a in s.get("attack_history", [])],
+                "normal_history": [dict(n) for n in s.get("normal_history", [])],
                 "recovery": dict(s.get("recovery", {
                     "state": "NOT_STARTED",
                     "normal_windows": 0,
@@ -464,6 +565,8 @@ class LiveSessionManager:
                 "incidents": [],
                 "normal": {"state": "NOT_STARTED"},
                 "attack": {"state": "NOT_STARTED"},
+                "attack_history": [],
+                "normal_history": [],
                 "recovery": {
                     "state": "NOT_STARTED",
                     "normal_windows": 0,
@@ -818,10 +921,23 @@ class LiveSessionManager:
         )
         capture_name = session_dict.get("capture_filename", "live_capture.csv")
 
+        incident_confirmed_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        first_window_utc = group[0]["window_start_utc"] if group else incident_confirmed_utc
+
         incident_summary = dict(incident)
         incident_summary["analysis_id"] = analysis_id
         incident_summary["analysis_registered"] = False
         incident_summary["response_state"] = "QUEUED"
+        incident_summary["response_latency"] = {
+            "first_anomalous_window_utc": first_window_utc,
+            "incident_confirmed_utc": incident_confirmed_utc,
+            "response_initiated_utc": None,
+            "attack_terminated_utc": None,
+            "detection_ms": None,
+            "mitigation_ms": None,
+            "detection_to_termination_ms": None,
+            "attack_mode": session_dict.get("attack", {}).get("mode"),
+        }
 
         session_dict.setdefault("incidents", []).append(incident_summary)
         session_dict.setdefault("incident_records", {})[analysis_id] = {
@@ -835,6 +951,9 @@ class LiveSessionManager:
             "incident": incident,
             "records": records,
             "capture_name": capture_name,
+            "first_anomalous_window_utc": first_window_utc,
+            "incident_confirmed_utc": incident_confirmed_utc,
+            "attack_mode": session_dict.get("attack", {}).get("mode"),
         })
 
     def _score_and_record_window(

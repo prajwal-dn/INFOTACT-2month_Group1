@@ -259,11 +259,49 @@ export const LiveSimulationsResult = z.object({
 });
 export type LiveSimulationsResult = z.infer<typeof LiveSimulationsResult>;
 
+export const LiveAttackRecord = z.object({
+  attack_id: z.string(),
+  mode: z.number(),
+  pid: z.number().optional(),
+  state: z.string(),
+  started_at: z.string(),
+  stopped_at: z.string().nullable().optional(),
+  return_code: z.number().nullable().optional(),
+  termination_reason: z.string().nullable().optional(),
+  incident_id: z.string().nullable().optional(),
+});
+export type LiveAttackRecord = z.infer<typeof LiveAttackRecord>;
+
+export const LiveNormalRecord = z.object({
+  normal_id: z.string(),
+  pid: z.number().optional(),
+  state: z.string(),
+  started_at: z.string(),
+  stopped_at: z.string().nullable().optional(),
+  return_code: z.number().nullable().optional(),
+  termination_reason: z.string().nullable().optional(),
+  interval_ms: z.number().optional(),
+});
+export type LiveNormalRecord = z.infer<typeof LiveNormalRecord>;
+
+export const ResponseLatency = z.object({
+  first_anomalous_window_utc: z.string().nullable().optional(),
+  incident_confirmed_utc: z.string().nullable().optional(),
+  response_initiated_utc: z.string().nullable().optional(),
+  attack_terminated_utc: z.string().nullable().optional(),
+  detection_ms: z.number().nullable().optional(),
+  mitigation_ms: z.number().nullable().optional(),
+  detection_to_termination_ms: z.number().nullable().optional(),
+  attack_mode: z.number().nullable().optional(),
+});
+export type ResponseLatency = z.infer<typeof ResponseLatency>;
+
 export const LiveIncident = Incident.passthrough().extend({
   analysis_id: z.string().optional(),
   analysis_registered: z.boolean().optional(),
   response_state: z.string().optional(),
   response_result: z.record(z.string(), z.unknown()).optional(),
+  response_latency: ResponseLatency.optional(),
 });
 export type LiveIncident = z.infer<typeof LiveIncident>;
 
@@ -284,6 +322,8 @@ export const LiveSession = z.object({
   normal: LiveNormal.optional(),
   attack: LiveAttack.optional(),
   recovery: LiveRecovery.optional(),
+  attack_history: z.array(LiveAttackRecord).optional(),
+  normal_history: z.array(LiveNormalRecord).optional(),
 });
 export type LiveSession = z.infer<typeof LiveSession>;
 

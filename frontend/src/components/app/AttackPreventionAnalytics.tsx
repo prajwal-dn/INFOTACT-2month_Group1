@@ -6,13 +6,12 @@
  * All values are derived from actual backend session data via
  * useAttackAnalytics. No values are hardcoded or fabricated.
  *
- * Layout:
- *   1. Summary metric cards (11 KPIs)
- *   2. Normal vs Malicious traffic over time (canvas bar chart)
- *   3. Attack Detection & Termination statistics (stacked bar)
- *   4. Attack Mode Comparison table
- *   5. Response Latency chart (window count per incident)
- *   6. Successful vs Failed Response comparison
+ * RIGOROUS MEASUREMENT:
+ *   - Attack attempts counted from persistent session attack history (supports repeated/mixed attacks).
+ *   - Normal traffic interruptions measured strictly by abnormal termination / process crash (manual user stops excluded).
+ *   - Millisecond response latency computed from first anomaly window -> process termination.
+ *   - Frame attribution during concurrent Mode 1 clearly labeled as ESTIMATED (0x100 shared).
+ *   - False positive validation ground truth is explicitly labeled as UNAVAILABLE.
  */
 import { useEffect, useRef } from "react";
 import {
@@ -31,7 +30,7 @@ import {
 } from "lucide-react";
 import { Panel } from "@/components/app/primitives";
 import { cn } from "@/lib/utils";
-import type { AttackAnalytics, AttackModeStats, TrafficDataPoint } from "@/lib/use-attack-analytics";
+import type { AttackAnalytics, AttackModeStats, LatencyDataPoint, TrafficDataPoint } from "@/lib/use-attack-analytics";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -54,6 +53,7 @@ interface MetricCardProps {
   label: string;
   value: React.ReactNode;
   sub?: string;
+  badge?: string;
   variant?: "default" | "success" | "warning" | "critical" | "info" | "muted";
 }
 
@@ -75,12 +75,19 @@ const VALUE_VARIANTS: Record<string, string> = {
   muted:    "text-muted-foreground",
 };
 
-function MetricCard({ icon, label, value, sub, variant = "default" }: MetricCardProps) {
+function MetricCard({ icon, label, value, sub, badge, variant = "default" }: MetricCardProps) {
   return (
     <div className={cn("rounded-xl border p-4 flex flex-col gap-1.5", CARD_VARIANTS[variant])}>
-      <div className={cn("flex items-center gap-1.5 text-[0.68rem] font-semibold uppercase tracking-wider", VALUE_VARIANTS[variant])}>
-        {icon}
-        {label}
+      <div className="flex items-center justify-between gap-1">
+        <div className={cn("flex items-center gap-1.5 text-[0.68rem] font-semibold uppercase tracking-wider", VALUE_VARIANTS[variant])}>
+          {icon}
+          {label}
+        </div>
+        {badge && (
+          <span className="rounded border border-amber-500/30 bg-amber-500/10 px-1 py-px font-mono text-[0.55rem] font-bold text-amber-400 uppercase">
+            {badge}
+          </span>
+        )}
       </div>
       <div className={cn("font-mono text-2xl font-bold leading-none", VALUE_VARIANTS[variant])}>
         {value}
@@ -137,7 +144,7 @@ function TrafficChart({ data }: { data: TrafficDataPoint[] }) {
       // Y-axis labels
       const val = Math.round((maxFrames * (gridLines - i)) / gridLines);
       ctx.fillStyle = "rgba(156,163,175,0.7)";
-      ctx.font = `${10 * dpr / dpr}px monospace`;
+      ctx.font = `${10}px monospace`;
       ctx.textAlign = "right";
       ctx.fillText(String(val), PAD_L - 4, y + 3.5);
     }
@@ -152,8 +159,8 @@ function TrafficChart({ data }: { data: TrafficDataPoint[] }) {
       // Malicious (bottom)
       if (d.maliciousFrames > 0) {
         ctx.fillStyle = d.prediction === "ANOMALY"
-          ? "rgba(239,68,68,0.75)"    // red when anomaly
-          : "rgba(239,68,68,0.3)";    // faint red in normal window (unexpected IDs present)
+          ? "rgba(239,68,68,0.75)"
+          : "rgba(239,68,68,0.3)";
         ctx.fillRect(x, PAD_T + chartH - maliciousH, barW, maliciousH);
       }
 
@@ -175,7 +182,7 @@ function TrafficChart({ data }: { data: TrafficDataPoint[] }) {
       }
     });
 
-    // X-axis labels (every ~5 windows)
+    // X-axis labels
     ctx.fillStyle = "rgba(156,163,175,0.7)";
     ctx.font = `${9}px monospace`;
     ctx.textAlign = "center";
@@ -189,7 +196,7 @@ function TrafficChart({ data }: { data: TrafficDataPoint[] }) {
 
     // Legend
     const legendItems = [
-      { color: "rgba(16,185,129,0.8)", label: "Normal frames" },
+      { color: "rgba(16,185,129,0.8)", label: "Normal (est. 0x100/101/102)" },
       { color: "rgba(239,68,68,0.8)",  label: "Malicious frames" },
       { color: "rgba(251,191,36,0.8)", label: "Anomaly score" },
     ];
@@ -201,7 +208,7 @@ function TrafficChart({ data }: { data: TrafficDataPoint[] }) {
       ctx.font = `${9}px monospace`;
       ctx.textAlign = "left";
       ctx.fillText(label, lx + 13, H - 4);
-      lx += label.length * 5.5 + 20;
+      lx += label.length * 5.2 + 18;
     });
   }, [data]);
 
@@ -245,7 +252,7 @@ function TerminationBar({ success, failed }: { success: number; failed: number }
           </div>
           <div className="font-mono text-2xl font-bold text-emerald-500">{success}</div>
           <div className="text-[0.68rem] text-muted-foreground">
-            {pct(success, total)} of termination attempts
+            {pct(success, total)} of confirmed terminations (return_code 0)
           </div>
         </div>
         <div className="flex-1 rounded-lg border border-destructive/30 bg-destructive/8 p-3">
@@ -254,7 +261,7 @@ function TerminationBar({ success, failed }: { success: number; failed: number }
           </div>
           <div className="font-mono text-2xl font-bold text-destructive">{failed}</div>
           <div className="text-[0.68rem] text-muted-foreground">
-            {pct(failed, total)} of termination attempts
+            {pct(failed, total)} non-zero return code or termination error
           </div>
         </div>
       </div>
@@ -272,7 +279,7 @@ function TerminationBar({ success, failed }: { success: number; failed: number }
           />
         </div>
         <div className="text-[0.65rem] text-muted-foreground">
-          Successful = attack process exited with return code 0 or clean signal. Failed = non-zero return code.
+          Only confirmed after specific process exit verification. In-progress attacks are never counted.
         </div>
       </div>
     </div>
@@ -283,13 +290,17 @@ function TerminationBar({ success, failed }: { success: number; failed: number }
 
 function ModeComparisonTable({ mode1, mode2 }: { mode1: AttackModeStats; mode2: AttackModeStats }) {
   const rows = [
-    { label: "Attempts", m1: mode1.attempts, m2: mode2.attempts },
-    { label: "Detected", m1: mode1.detected, m2: mode2.detected },
-    { label: "Terminated (success)", m1: mode1.successfulTerminations, m2: mode2.successfulTerminations },
-    { label: "Terminated (failed)", m1: mode1.failedTerminations, m2: mode2.failedTerminations },
-    { label: "Avg detection windows", m1: mode1.avgDetectionWindowCount, m2: mode2.avgDetectionWindowCount },
+    { label: "Attempts (Session Total)", m1: mode1.attempts, m2: mode2.attempts },
+    { label: "Detected Incidents", m1: mode1.detected, m2: mode2.detected },
+    { label: "Terminated (Success, rc=0)", m1: mode1.successfulTerminations, m2: mode2.successfulTerminations },
+    { label: "Terminated (Failed, rc≠0)", m1: mode1.failedTerminations, m2: mode2.failedTerminations },
     {
-      label: "Peak anomaly score",
+      label: "Avg Response Latency",
+      m1: mode1.avgLatencyMs != null ? `${fmt(mode1.avgLatencyMs)} ms` : "—",
+      m2: mode2.avgLatencyMs != null ? `${fmt(mode2.avgLatencyMs)} ms` : "—",
+    },
+    {
+      label: "Peak Threat Score",
       m1: mode1.peakAnomalyScore > 0 ? mode1.peakAnomalyScore.toFixed(4) : "—",
       m2: mode2.peakAnomalyScore > 0 ? mode2.peakAnomalyScore.toFixed(4) : "—",
     },
@@ -302,10 +313,10 @@ function ModeComparisonTable({ mode1, mode2 }: { mode1: AttackModeStats; mode2: 
           <tr className="border-b border-border/60">
             <th className="pb-2 text-left font-semibold text-muted-foreground pr-4">Metric</th>
             <th className="pb-2 text-right font-mono font-semibold text-amber-500 pr-4">
-              Mode 1 · Flood
+              Mode 1 · Flood (0x100)
             </th>
             <th className="pb-2 text-right font-mono font-semibold text-orange-400">
-              Mode 2 · Extended ID
+              Mode 2 · Extended ID (0x999)
             </th>
           </tr>
         </thead>
@@ -335,9 +346,9 @@ function ModeComparisonTable({ mode1, mode2 }: { mode1: AttackModeStats; mode2: 
   );
 }
 
-// ─── Response Latency Chart ───────────────────────────────────────────────────
+// ─── Response Latency Chart (Milliseconds) ────────────────────────────────────
 
-function LatencyChart({ points }: { points: { incidentId: string; detectionWindowCount: number; severity: string }[] }) {
+function LatencyChart({ points }: { points: LatencyDataPoint[] }) {
   if (points.length === 0) {
     return (
       <div className="flex h-28 items-center justify-center text-sm text-muted-foreground">
@@ -346,12 +357,16 @@ function LatencyChart({ points }: { points: { incidentId: string; detectionWindo
     );
   }
 
-  const max = Math.max(...points.map((p) => p.detectionWindowCount), 1);
+  const validMs = points
+    .map((p) => p.detectionToTerminationMs)
+    .filter((ms): ms is number => ms != null);
+  const maxMs = validMs.length > 0 ? Math.max(...validMs, 100) : 1000;
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       {points.map((p) => {
-        const widthPct = (p.detectionWindowCount / max) * 100;
+        const ms = p.detectionToTerminationMs;
+        const widthPct = ms != null ? Math.min(100, (ms / maxMs) * 100) : 0;
         const barColor =
           p.severity === "HIGH"
             ? "bg-destructive"
@@ -360,25 +375,30 @@ function LatencyChart({ points }: { points: { incidentId: string; detectionWindo
               : "bg-primary";
 
         return (
-          <div key={p.incidentId} className="space-y-0.5">
-            <div className="flex justify-between font-mono text-[0.68rem] text-muted-foreground">
-              <span>{p.incidentId.slice(0, 12)}</span>
-              <span className="font-semibold text-foreground">
-                {p.detectionWindowCount} window{p.detectionWindowCount !== 1 ? "s" : ""}
+          <div key={p.incidentId} className="space-y-1">
+            <div className="flex items-center justify-between font-mono text-[0.68rem]">
+              <span className="text-muted-foreground">{p.incidentId} (Mode {p.attackMode ?? "—"})</span>
+              <span className="font-bold text-foreground">
+                {ms != null ? `${fmt(ms)} ms` : "Measuring..."}
               </span>
             </div>
             <div className="h-2 overflow-hidden rounded-full bg-secondary">
               <div
                 className={cn("h-full rounded-full transition-all", barColor)}
-                style={{ width: `${widthPct}%` }}
+                style={{ width: `${Math.max(4, widthPct)}%` }}
               />
             </div>
+            {(p.detectionMs != null || p.mitigationMs != null) && (
+              <div className="flex justify-between text-[0.62rem] text-muted-foreground/80 font-mono">
+                <span>Detection: {p.detectionMs != null ? `${fmt(p.detectionMs)} ms` : "—"}</span>
+                <span>Mitigation: {p.mitigationMs != null ? `${fmt(p.mitigationMs)} ms` : "—"}</span>
+              </div>
+            )}
           </div>
         );
       })}
-      <p className="text-[0.65rem] text-muted-foreground">
-        Windows = anomalous window count from first detection to incident confirmation.
-        Each window ≈ 1 second of CAN traffic.
+      <p className="text-[0.65rem] text-muted-foreground pt-1">
+        Latency = actual milliseconds from first anomalous CAN window to attack process termination confirmation.
       </p>
     </div>
   );
@@ -401,10 +421,11 @@ export function AttackPreventionAnalytics({
     successfulTerminations,
     failedTerminations,
     normalTrafficInterruptions,
-    avgDetectionWindowCount,
-    normalFramesDuringAttack,
-    normalFramesAfterMitigation,
-    unconfirmedAnomalyWindows,
+    avgResponseLatencyMs,
+    estimatedNormalFramesDuringAttack,
+    estimatedNormalFramesAfterMitigation,
+    uncorrelatedAnomalyWindows,
+    falsePositiveStatus,
     mode1Stats,
     mode2Stats,
     trafficTimeSeries,
@@ -446,7 +467,7 @@ export function AttackPreventionAnalytics({
             icon={<Zap className="size-3.5" />}
             label="Attack Attempts"
             value={fmt(totalAttackAttempts)}
-            sub="Attack simulator started this session"
+            sub="Persistent session attack records"
             variant={totalAttackAttempts > 0 ? "warning" : "muted"}
           />
           <MetricCard
@@ -464,54 +485,57 @@ export function AttackPreventionAnalytics({
             icon={<CheckCircle2 className="size-3.5" />}
             label="Terminated (success)"
             value={fmt(successfulTerminations)}
-            sub="Attack process exited cleanly (rc=0)"
+            sub="Confirmed process exit (return_code 0)"
             variant={successfulTerminations > 0 ? "success" : "muted"}
           />
           <MetricCard
             icon={<XCircle className="size-3.5" />}
             label="Terminated (failed)"
             value={fmt(failedTerminations)}
-            sub="Non-zero exit code on termination"
+            sub="Non-zero exit code or process crash"
             variant={failedTerminations > 0 ? "critical" : "muted"}
           />
           <MetricCard
             icon={<AlertOctagon className="size-3.5" />}
             label="Normal Interruptions"
             value={fmt(normalTrafficInterruptions)}
-            sub="Normal generator stopped during active attack"
-            variant={normalTrafficInterruptions > 0 ? "warning" : "success"}
+            sub="Generator crashes only (manual stops excluded)"
+            variant={normalTrafficInterruptions > 0 ? "critical" : "success"}
           />
           <MetricCard
             icon={<Clock className="size-3.5" />}
-            label="Avg Detection Windows"
+            label="Avg Response Latency"
             value={
-              avgDetectionWindowCount != null
-                ? fmt(avgDetectionWindowCount, 1)
+              avgResponseLatencyMs != null
+                ? `${fmt(avgResponseLatencyMs)} ms`
                 : "—"
             }
-            sub="Anomalous windows to incident confirmation (~1s each)"
+            sub="First anomaly window to process termination"
             variant="info"
           />
           <MetricCard
             icon={<Radio className="size-3.5" />}
-            label="Normal Frames During Attack"
-            value={fmt(normalFramesDuringAttack)}
-            sub="Legitimate frames in anomaly windows (0x100/0x101/0x102)"
-            variant={normalFramesDuringAttack > 0 ? "success" : "muted"}
+            label="Normal Frames (Attack)"
+            badge="Estimated"
+            value={fmt(estimatedNormalFramesDuringAttack)}
+            sub="0x100 shared by RPM & Mode 1 flood"
+            variant={estimatedNormalFramesDuringAttack > 0 ? "success" : "muted"}
           />
           <MetricCard
             icon={<Activity className="size-3.5" />}
-            label="Normal Frames Post-Mitigation"
-            value={fmt(normalFramesAfterMitigation)}
-            sub="Legitimate frames captured after attack stopped"
-            variant={normalFramesAfterMitigation > 0 ? "success" : "muted"}
+            label="Normal Frames (Post-Mit)"
+            badge="Estimated"
+            value={fmt(estimatedNormalFramesAfterMitigation)}
+            sub="Captured after attack simulator stopped"
+            variant={estimatedNormalFramesAfterMitigation > 0 ? "success" : "muted"}
           />
           <MetricCard
             icon={<AlertTriangle className="size-3.5" />}
-            label="Unconfirmed Anomaly Windows"
-            value={fmt(unconfirmedAnomalyWindows)}
-            sub="Anomaly windows not correlated to any confirmed incident"
-            variant={unconfirmedAnomalyWindows > 0 ? "warning" : "muted"}
+            label="Uncorrelated Windows"
+            badge="Ground Truth: N/A"
+            value={fmt(uncorrelatedAnomalyWindows)}
+            sub="Anomaly window without confirmed incident"
+            variant={uncorrelatedAnomalyWindows > 0 ? "warning" : "muted"}
           />
           <MetricCard
             icon={<Shield className="size-3.5" />}
@@ -545,17 +569,22 @@ export function AttackPreventionAnalytics({
         {/* ── Normal vs Malicious Traffic Over Time ────────────────────── */}
         <div className="rounded-lg border border-border/60 bg-card p-4">
           <div className="mb-3 flex items-center justify-between">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-              Normal vs Malicious CAN Traffic Over Time
-            </h4>
+            <div>
+              <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                Estimated Normal vs Malicious CAN Traffic Over Time
+                <span className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[0.6rem] font-bold text-amber-400">
+                  ESTIMATED · 0x100 Shared
+                </span>
+              </h4>
+            </div>
             <span className="font-mono text-[0.65rem] text-muted-foreground">
               {trafficTimeSeries.length} windows · per-window frame breakdown
             </span>
           </div>
           <TrafficChart data={trafficTimeSeries} />
           <p className="mt-2 text-[0.65rem] text-muted-foreground">
-            Green bars = frames from known normal IDs (0x100, 0x101, 0x102). Red bars = frames from all other IDs.
-            Yellow line = Isolation Forest anomaly score per window.
+            Notice: CAN arbitration ID 0x100 is emitted by both legitimate RPM generator and Mode 1 flood simulator.
+            Bus-level frames cannot be separated with 100% cryptographic certainty without sender tagging; attribution during Mode 1 is an estimate based on nominal transmission rate. Mode 2 (0x999) frames are strictly malicious.
           </p>
         </div>
 
@@ -569,7 +598,7 @@ export function AttackPreventionAnalytics({
           <div className="mb-4 space-y-2">
             {[
               {
-                label: "Attack simulator started",
+                label: "Attack simulator processes started (History)",
                 value: totalAttackAttempts,
                 color: "bg-amber-500",
                 icon: <Zap className="size-3" />,
@@ -581,13 +610,13 @@ export function AttackPreventionAnalytics({
                 icon: <ShieldAlert className="size-3" />,
               },
               {
-                label: "Successfully terminated (rc=0)",
+                label: "Confirmed terminated processes (rc=0)",
                 value: successfulTerminations,
                 color: "bg-emerald-500",
                 icon: <CheckCircle2 className="size-3" />,
               },
               {
-                label: "Termination failed (rc≠0)",
+                label: "Termination failed (rc≠0 or crash)",
                 value: failedTerminations,
                 color: "bg-rose-700",
                 icon: <XCircle className="size-3" />,
@@ -615,9 +644,7 @@ export function AttackPreventionAnalytics({
           </div>
 
           <p className="text-[0.65rem] text-muted-foreground">
-            Detection rate: an attack is "detected" only when the backend Isolation Forest
-            confirms ≥2 consecutive anomalous windows as a security incident.
-            Termination is confirmed only when the attack process exits (return_code reported).
+            Strict process exit verification: an attack is only counted as successfully stopped after confirming the specific PID exited with return code 0 or clean signal.
           </p>
         </div>
 
@@ -626,21 +653,21 @@ export function AttackPreventionAnalytics({
           <div className="rounded-lg border border-border/60 bg-card p-4">
             <div className="mb-3 flex items-center justify-between">
               <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                Attack Mode Comparison
+                Attack Mode Comparison (Attributed by Record)
               </h4>
               <ShieldCheck className="size-4 text-muted-foreground/40" />
             </div>
             <ModeComparisonTable mode1={mode1Stats} mode2={mode2Stats} />
             <p className="mt-3 text-[0.65rem] text-muted-foreground">
-              Mode 1 floods 0x100 at 1ms intervals. Mode 2 injects extended ID 0x999 at 50ms.
-              Statistics are reset per session.
+              Mode 1 floods 0x100 at 1ms. Mode 2 injects extended ID 0x999 at 50ms.
+              Statistics are attributed across all individual attack records in this session.
             </p>
           </div>
 
           <div className="rounded-lg border border-border/60 bg-card p-4">
             <div className="mb-3 flex items-center justify-between">
               <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                Response Latency by Incident
+                Response Latency (Milliseconds)
               </h4>
               <Clock className="size-4 text-muted-foreground/40" />
             </div>
@@ -652,27 +679,23 @@ export function AttackPreventionAnalytics({
         <div className="rounded-lg border border-border/60 bg-card p-4">
           <div className="mb-4 flex items-center justify-between">
             <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-              Successful vs Failed Response Comparison
+              Successful vs Failed Termination Comparison
             </h4>
             <TrendingDown className="size-4 text-muted-foreground/40" />
           </div>
           <TerminationBar success={successfulTerminations} failed={failedTerminations} />
         </div>
 
-        {/* ── Data Sources Footer ───────────────────────────────────────── */}
+        {/* ── Data Rigor & Ground Truth Notice ─────────────────────────── */}
         <div className="rounded-lg border border-border/40 bg-secondary/20 p-3">
           <p className="text-[0.65rem] leading-relaxed text-muted-foreground">
-            <span className="font-semibold text-foreground">Data sources:</span>{" "}
-            All metrics derived from actual backend session data:
-            <code className="ml-1 mr-0.5 rounded bg-secondary px-1 py-0.5 font-mono text-[0.6rem]">session.windows[]</code> (per-window predictions &amp; frame counts),
-            <code className="ml-0.5 mr-0.5 rounded bg-secondary px-1 py-0.5 font-mono text-[0.6rem]">session.incidents[]</code> (confirmed incidents),
-            <code className="ml-0.5 mr-0.5 rounded bg-secondary px-1 py-0.5 font-mono text-[0.6rem]">session.attack.return_code</code> (termination outcome),
-            <code className="ml-0.5 mr-0.5 rounded bg-secondary px-1 py-0.5 font-mono text-[0.6rem]">session.recovery</code> (verified recovery windows).
-            No values are hardcoded or estimated.
+            <span className="font-semibold text-foreground">Data Measurement Status:</span>{" "}
+            <span className="text-emerald-400 font-semibold">Measured:</span> Attack attempts, detections, process terminations, generator interruptions, and response latency (ms).{" "}
+            <span className="text-amber-400 font-semibold">Estimated:</span> Normal vs malicious frame separation during concurrent Mode 1 (due to shared arbitration ID 0x100).{" "}
+            <span className="text-rose-400 font-semibold">Unavailable:</span> False-positive count (the virtual CAN interface lacks ground-truth ECU attestation).
           </p>
         </div>
       </div>
     </Panel>
   );
 }
-

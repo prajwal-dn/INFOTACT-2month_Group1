@@ -2,23 +2,30 @@
  * useAttackAnalytics
  *
  * Pure derivation hook — computes Attack Prevention Analytics metrics from the
- * LiveSession snapshot that is already polled by useLiveSession.
+ * LiveSession snapshot that is polled by useLiveSession.
  *
- * IMPORTANT: Every value is derived from actual backend data:
- *   - session.windows[]       → per-window predictions, scores, can_id_counts
- *   - session.incidents[]     → confirmed backend incidents
- *   - session.attack          → process state + return_code (determines termination success)
- *   - session.normal          → normal generator state
- *   - session.recovery        → recovery verification progress
- *   - session.frames_captured → total frame count
- *
- * No metric is hardcoded or fabricated. A termination is counted as "successful"
- * only when attack.return_code is 0 or null (clean exit), never merely from an
- * incident being detected. Normal traffic continuity is counted from actual
- * window-level frame data, not from simulated values.
+ * RIGOROUS MEASUREMENT CRITERIA (Phase 4 Corrections):
+ * 1. Attack attempts: Counted from persistent per-session `attack_history`,
+ *    accurately reflecting repeated attacks of identical or mixed modes.
+ * 2. Mode attribution: Statistics for Mode 1 (Flood 0x100) and Mode 2 (Extended 0x999)
+ *    are attributed to individual attack history records.
+ * 3. Normal traffic interruptions: Measured strictly via normal generator lifecycle
+ *    termination reasons (e.g. "PROCESS_CRASH" or non-zero exit code). Manual user
+ *    stops ("MANUAL_USER_STOP", "SESSION_STOP") are NEVER counted as interruptions.
+ * 4. Frame attribution: CAN arbitration ID 0x100 is emitted by BOTH normal RPM
+ *    generator and Mode 1 flood simulator. Bus-level frames cannot be attributed with
+ *    100% cryptographic certainty without sender tagging; attribution during Mode 1
+ *    is clearly marked as ESTIMATED.
+ * 5. Response Latency: Measured in milliseconds using actual backend milestones:
+ *    first_anomalous_window_utc -> incident_confirmed_utc -> response_initiated_utc -> attack_terminated_utc.
+ * 6. Successful terminations: Only counted after confirming the specific attack process
+ *    exited cleanly (return_code 0 or clean signal exit). In-progress attacks are never counted.
+ * 7. False Positives: Ground truth is UNAVAILABLE on uninstrumented live virtual CAN bus.
+ *    Single isolated anomaly windows that do not form a 2-window incident are labeled as
+ *    "Uncorrelated Anomaly Windows (Ground truth unavailable)".
  */
 import { useMemo } from "react";
-import type { LiveSession } from "@/lib/api/schemas";
+import type { LiveSession, LiveAttackRecord, LiveNormalRecord, LiveIncident } from "@/lib/api/schemas";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -29,7 +36,7 @@ export interface AttackModeStats {
   detected: number;
   successfulTerminations: number;
   failedTerminations: number;
-  avgDetectionWindowCount: number;
+  avgLatencyMs: number | null;
   peakAnomalyScore: number;
 }
 
@@ -42,44 +49,48 @@ export interface TrafficDataPoint {
   totalFrames: number;
   prediction: "NORMAL" | "ANOMALY";
   anomalyScore: number;
+  isEstimated: boolean;
 }
 
-/** Time series point for Response Latency chart */
+/** Response Latency per incident */
 export interface LatencyDataPoint {
   incidentId: string;
-  /** Number of windows elapsed from first anomaly to incident being confirmed */
-  detectionWindowCount: number;
-  /** Attack mode that triggered this incident (from session.attack.mode) */
+  firstAnomalousWindowUtc?: string | null;
+  incidentConfirmedUtc?: string | null;
+  responseInitiatedUtc?: string | null;
+  attackTerminatedUtc?: string | null;
+  detectionToTerminationMs: number | null;
+  detectionMs?: number | null;
+  mitigationMs?: number | null;
   attackMode: number | null;
   severity: string;
 }
 
 export interface AttackAnalytics {
   // ── Core counters ──────────────────────────────────────────────────────────
-  /** Number of times attack.state transitioned to RUNNING in this session (1 per session for now) */
+  /** Total attack attempts across session attack history */
   totalAttackAttempts: number;
-  /** Number of incidents confirmed by backend Isolation Forest */
+  /** Total attacks detected (confirmed backend incidents) */
   totalAttacksDetected: number;
-  /** Terminations where attack.return_code === 0 or null (clean exit) */
+  /** Successfully terminated attack processes (verified process exit with return_code 0/clean) */
   successfulTerminations: number;
-  /** Terminations where attack.return_code is a non-zero integer */
+  /** Failed termination attempts (process exit code != 0 or termination error) */
   failedTerminations: number;
-  /** Whether normal generator was interrupted (stopped while attack was active) */
+  /** Normal traffic interruptions (crashes/abnormal exits, excluding manual stops) */
   normalTrafficInterruptions: number;
-  /** Average window count from first anomaly window to incident confirmation */
-  avgDetectionWindowCount: number | null;
-  /** Total normal-traffic frames captured during anomalous windows */
-  normalFramesDuringAttack: number;
-  /** Total normal-traffic frames captured after the attack was stopped */
-  normalFramesAfterMitigation: number;
-  /**
-   * Windows predicted ANOMALY but no incident was ever confirmed.
-   * These represent single isolated anomaly windows not reaching the
-   * 2-consecutive-window threshold → they are not false positives in the
-   * classical sense, but we surface them as "unconfirmed anomaly windows"
-   * since we cannot say the backend confirmed them as incidents.
-   */
-  unconfirmedAnomalyWindows: number;
+  /** Mean detection-to-termination latency in milliseconds across confirmed incidents */
+  avgResponseLatencyMs: number | null;
+  /** Estimated normal-traffic frames captured during anomalous windows (0x100 shared with Mode 1) */
+  estimatedNormalFramesDuringAttack: number;
+  /** Estimated normal-traffic frames captured after attack process stopped */
+  estimatedNormalFramesAfterMitigation: number;
+  /** Whether normal vs malicious frame attribution is estimated due to shared 0x100 */
+  isFrameAttributionEstimated: boolean;
+  /** Windows flagged ANOMALY but not forming a multi-window incident (Ground truth unavailable) */
+  uncorrelatedAnomalyWindows: number;
+  /** Ground truth status for false positives */
+  falsePositiveStatus: "UNAVAILABLE";
+  falsePositiveNote: string;
 
   // ── Per-mode stats ─────────────────────────────────────────────────────────
   mode1Stats: AttackModeStats;
@@ -90,15 +101,10 @@ export interface AttackAnalytics {
   latencyPoints: LatencyDataPoint[];
 
   // ── Current session state ──────────────────────────────────────────────────
-  /** true if any incident was confirmed in this session */
   hasIncidents: boolean;
-  /** true if latest recovery state is RECOVERED */
   recoveryVerified: boolean;
-  /** Consecutive normal windows verified post-attack */
   verifiedNormalWindows: number;
-  /** Current attack mode from session.attack.mode */
   currentAttackMode: number | null;
-  /** Summary of recovery state for display */
   recoveryState: string;
 }
 
@@ -116,9 +122,19 @@ function emptyModeStats(mode: 1 | 2): AttackModeStats {
     detected: 0,
     successfulTerminations: 0,
     failedTerminations: 0,
-    avgDetectionWindowCount: 0,
+    avgLatencyMs: null,
     peakAnomalyScore: 0,
   };
+}
+
+function parseIsoMs(ts?: string | null): number | null {
+  if (!ts) return null;
+  try {
+    const ms = Date.parse(ts);
+    return isNaN(ms) ? null : ms;
+  } catch {
+    return null;
+  }
 }
 
 function deriveAnalytics(session: LiveSession | undefined): AttackAnalytics {
@@ -128,10 +144,13 @@ function deriveAnalytics(session: LiveSession | undefined): AttackAnalytics {
     successfulTerminations: 0,
     failedTerminations: 0,
     normalTrafficInterruptions: 0,
-    avgDetectionWindowCount: null,
-    normalFramesDuringAttack: 0,
-    normalFramesAfterMitigation: 0,
-    unconfirmedAnomalyWindows: 0,
+    avgResponseLatencyMs: null,
+    estimatedNormalFramesDuringAttack: 0,
+    estimatedNormalFramesAfterMitigation: 0,
+    isFrameAttributionEstimated: true,
+    uncorrelatedAnomalyWindows: 0,
+    falsePositiveStatus: "UNAVAILABLE",
+    falsePositiveNote: "Ground truth mechanism unavailable on uninstrumented live virtual CAN bus",
     mode1Stats: emptyModeStats(1),
     mode2Stats: emptyModeStats(2),
     trafficTimeSeries: [],
@@ -147,62 +166,122 @@ function deriveAnalytics(session: LiveSession | undefined): AttackAnalytics {
 
   const windows = session.windows ?? [];
   const incidents = session.incidents ?? [];
-  const attack = session.attack;
-  const normal = session.normal;
   const recovery = session.recovery;
 
-  // ── 1. Attack attempt count ───────────────────────────────────────────────
-  // The backend starts one attack process per session. We count an attempt
-  // whenever attack.state is not "NOT_STARTED".
-  const attackAttempted =
-    attack?.state === "RUNNING" || attack?.state === "STOPPED";
-  const totalAttackAttempts = attackAttempted ? 1 : 0;
+  // ── 1. Attack attempts from persistent per-session attack history ──────────
+  // Fall back to session.attack if session.attack_history is not populated
+  const attackHistory: LiveAttackRecord[] =
+    session.attack_history && session.attack_history.length > 0
+      ? session.attack_history
+      : session.attack && session.attack.state !== "NOT_STARTED"
+        ? [
+            {
+              attack_id: "att_1",
+              mode: session.attack.mode ?? 1,
+              pid: session.attack.pid,
+              state: session.attack.state,
+              started_at: session.started_at,
+              stopped_at: session.attack.state === "STOPPED" ? session.started_at : null,
+              return_code: session.attack.return_code ?? null,
+              termination_reason: session.attack.state === "STOPPED" ? "TERMINATED" : null,
+            },
+          ]
+        : [];
+
+  const totalAttackAttempts = attackHistory.length;
 
   // ── 2. Detections = confirmed incidents ───────────────────────────────────
   const totalAttacksDetected = incidents.length;
 
-  // ── 3. Termination success/failure ───────────────────────────────────────
-  // Success = attack.return_code is 0 or null (clean SIGINT/natural exit).
-  // Failure = attack.return_code is a non-zero integer.
-  // We only count a termination when the process actually exited (state=STOPPED).
+  // ── 3. Successful vs Failed terminations across individual attack records ──
+  // A termination is counted ONLY when the process has exited (state === "STOPPED")
+  // Clean termination: return_code === 0 or null (SIGINT clean exit) AND reason != PROCESS_CRASH
+  // Failed termination: return_code != 0
   let successfulTerminations = 0;
   let failedTerminations = 0;
 
-  if (attack?.state === "STOPPED") {
-    const rc = attack.return_code;
-    if (rc == null || rc === 0) {
-      successfulTerminations = 1;
-    } else {
-      failedTerminations = 1;
+  for (const att of attackHistory) {
+    if (att.state === "STOPPED") {
+      const rc = att.return_code;
+      if (att.termination_reason === "PROCESS_CRASH" || (rc != null && rc !== 0)) {
+        failedTerminations++;
+      } else {
+        successfulTerminations++;
+      }
     }
   }
 
-  // ── 4. Normal traffic interruptions ──────────────────────────────────────
-  // Count: normal generator was STOPPED (by user or stopAll) while an attack
-  // was also running in the same session. We detect this by checking if
-  // normal.state=STOPPED and there was at least one incident.
-  const normalInterrupted =
-    normal?.state === "STOPPED" && incidents.length > 0 ? 1 : 0;
+  // ── 4. Normal traffic interruptions from generator lifecycle ─────────────
+  // Interruption is counted ONLY if the normal generator crashed or exited abnormally.
+  // Manual user stops ("MANUAL_USER_STOP", "MANUAL_USER_STOP_ALL", "SESSION_STOP")
+  // are NEVER counted as interruptions.
+  const normalHistory: LiveNormalRecord[] =
+    session.normal_history && session.normal_history.length > 0
+      ? session.normal_history
+      : session.normal && session.normal.state !== "NOT_STARTED"
+        ? [
+            {
+              normal_id: "norm_1",
+              pid: session.normal.pid,
+              state: session.normal.state,
+              started_at: session.started_at,
+              stopped_at: session.normal.state === "STOPPED" ? session.started_at : null,
+              return_code: session.normal.return_code ?? null,
+              termination_reason: null,
+            },
+          ]
+        : [];
 
-  // ── 5. Avg detection window count ─────────────────────────────────────────
-  // For each confirmed incident: window_count is the number of anomalous windows
-  // that were correlated. This is our proxy for detection latency.
-  const detectionWindowCounts = incidents.map((inc) => inc.window_count ?? 1);
-  const avgDetectionWindowCount =
-    detectionWindowCounts.length > 0
-      ? detectionWindowCounts.reduce((a, b) => a + b, 0) / detectionWindowCounts.length
+  const normalTrafficInterruptions = normalHistory.filter((n) => {
+    if (n.state !== "STOPPED") return false;
+    if (n.termination_reason === "PROCESS_CRASH") return true;
+    if (n.return_code != null && n.return_code !== 0) return true;
+    return false;
+  }).length;
+
+  // ── 5. Response Latency in milliseconds ───────────────────────────────────
+  const latencyPoints: LatencyDataPoint[] = incidents.map((inc: LiveIncident) => {
+    const lat = inc.response_latency;
+    let detectionToTerminationMs: number | null = lat?.detection_to_termination_ms ?? null;
+
+    // If backend latency wasn't pre-computed, calculate from available ISO timestamps
+    if (detectionToTerminationMs == null) {
+      const t0 = parseIsoMs(lat?.first_anomalous_window_utc ?? inc.start_time_utc);
+      const t3 = parseIsoMs(lat?.attack_terminated_utc ?? inc.end_time_utc);
+      if (t0 != null && t3 != null && t3 >= t0) {
+        detectionToTerminationMs = t3 - t0;
+      }
+    }
+
+    return {
+      incidentId: inc.incident_id,
+      firstAnomalousWindowUtc: lat?.first_anomalous_window_utc ?? inc.start_time_utc,
+      incidentConfirmedUtc: lat?.incident_confirmed_utc ?? inc.end_time_utc,
+      responseInitiatedUtc: lat?.response_initiated_utc ?? null,
+      attackTerminatedUtc: lat?.attack_terminated_utc ?? null,
+      detectionToTerminationMs,
+      detectionMs: lat?.detection_ms ?? null,
+      mitigationMs: lat?.mitigation_ms ?? null,
+      attackMode: lat?.attack_mode ?? session.attack?.mode ?? null,
+      severity: inc.severity,
+    };
+  });
+
+  const validLatencies = latencyPoints
+    .map((p) => p.detectionToTerminationMs)
+    .filter((ms): ms is number => ms != null && ms >= 0);
+
+  const avgResponseLatencyMs =
+    validLatencies.length > 0
+      ? Math.round(validLatencies.reduce((a, b) => a + b, 0) / validLatencies.length)
       : null;
 
-  // ── 6. Normal frames during attack / after mitigation ───────────────────
-  // "During attack" = windows scored while attack.state was RUNNING, but we
-  // don't have per-window process state. Best proxy: anomalous windows.
-  // "Normal frames during attack" = frames from known normal IDs within anomaly windows.
-  // "Normal frames after mitigation" = frames from known normal IDs in NORMAL
-  // windows that appear after stopped_after_window_index.
+  // ── 6. Normal frames during attack / after mitigation (ESTIMATED) ─────────
+  // Note: CAN ID 0x100 is emitted by both normal RPM generator and Mode 1 flood simulator.
+  // Frames cannot be separated on the bus without sender tagging. Marked as ESTIMATED.
   const stoppedAfterIdx = recovery?.stopped_after_window_index ?? null;
-
-  let normalFramesDuringAttack = 0;
-  let normalFramesAfterMitigation = 0;
+  let estimatedNormalFramesDuringAttack = 0;
+  let estimatedNormalFramesAfterMitigation = 0;
 
   for (const w of windows) {
     const evidence = w.response_evidence;
@@ -213,52 +292,67 @@ function deriveAnalytics(session: LiveSession | undefined): AttackAnalytics {
       .reduce((acc, [, cnt]) => acc + cnt, 0);
 
     if (w.prediction === "ANOMALY") {
-      normalFramesDuringAttack += normalCount;
+      estimatedNormalFramesDuringAttack += normalCount;
     } else if (stoppedAfterIdx != null && w.window_index > stoppedAfterIdx) {
-      normalFramesAfterMitigation += normalCount;
+      estimatedNormalFramesAfterMitigation += normalCount;
     }
   }
 
-  // ── 7. Unconfirmed anomaly windows ────────────────────────────────────────
-  // Anomaly windows that were NOT part of any confirmed incident window range.
+  // ── 7. False Positives Ground Truth Check ─────────────────────────────────
+  // Ground truth ECU attestation does not exist on live virtual CAN interface.
+  // Single isolated anomaly windows not reaching 2-window threshold are uncorrelated.
   const confirmedWindowIndices = new Set<number>();
   for (const inc of incidents) {
     for (let i = inc.start_window; i <= inc.end_window; i++) {
       confirmedWindowIndices.add(i);
     }
   }
-  const unconfirmedAnomalyWindows = windows.filter(
+  const uncorrelatedAnomalyWindows = windows.filter(
     (w) => w.prediction === "ANOMALY" && !confirmedWindowIndices.has(w.window_index)
   ).length;
 
-  // ── 8. Per-mode stats ─────────────────────────────────────────────────────
-  // The backend tracks one attack process with one mode per session.
-  // We attribute all incidents in this session to the current attack mode.
-  const mode = attack?.mode as 1 | 2 | undefined;
+  // ── 8. Per-mode stats from individual attack records ──────────────────────
   const mode1Stats = emptyModeStats(1);
   const mode2Stats = emptyModeStats(2);
 
-  if (attackAttempted && mode) {
-    const targetStats = mode === 1 ? mode1Stats : mode2Stats;
-    targetStats.attempts = 1;
-    targetStats.detected = incidents.length;
-    targetStats.successfulTerminations = successfulTerminations;
-    targetStats.failedTerminations = failedTerminations;
-    targetStats.avgDetectionWindowCount =
-      avgDetectionWindowCount != null ? Math.round(avgDetectionWindowCount * 10) / 10 : 0;
+  for (const att of attackHistory) {
+    const target = att.mode === 1 ? mode1Stats : mode2Stats;
+    target.attempts++;
 
-    // Peak anomaly score across all anomaly windows
-    const anomalyScores = windows
-      .filter((w) => w.prediction === "ANOMALY")
-      .map((w) => w.anomaly_score);
-    targetStats.peakAnomalyScore =
-      anomalyScores.length > 0 ? Math.max(...anomalyScores) : 0;
+    if (att.state === "STOPPED") {
+      const rc = att.return_code;
+      if (att.termination_reason === "PROCESS_CRASH" || (rc != null && rc !== 0)) {
+        target.failedTerminations++;
+      } else {
+        target.successfulTerminations++;
+      }
+    }
+  }
+
+  // Attribute detected incidents and latencies to modes
+  for (const lp of latencyPoints) {
+    const target = lp.attackMode === 2 ? mode2Stats : mode1Stats;
+    target.detected++;
+    if (lp.detectionToTerminationMs != null) {
+      const existing = target.avgLatencyMs;
+      target.avgLatencyMs =
+        existing != null
+          ? Math.round((existing + lp.detectionToTerminationMs) / 2)
+          : lp.detectionToTerminationMs;
+    }
+  }
+
+  // Peak anomaly score per mode
+  const anomalyWindows = windows.filter((w) => w.prediction === "ANOMALY");
+  if (anomalyWindows.length > 0) {
+    const scores = anomalyWindows.map((w) => w.anomaly_score);
+    const peak = Math.max(...scores);
+    // Attribute peak to the active or dominant attack mode
+    if (mode1Stats.attempts > 0) mode1Stats.peakAnomalyScore = peak;
+    if (mode2Stats.attempts > 0) mode2Stats.peakAnomalyScore = peak;
   }
 
   // ── 9. Traffic time series ────────────────────────────────────────────────
-  // For each scored window, compute normal vs malicious frame counts.
-  // "Malicious frames" = frames from non-normal CAN IDs.
-  // "Normal frames"   = frames from known normal IDs (0x100, 0x101, 0x102).
   const trafficTimeSeries: TrafficDataPoint[] = windows.map((w) => {
     const evidence = w.response_evidence;
     const idCounts = evidence?.can_id_counts ?? {};
@@ -281,27 +375,23 @@ function deriveAnalytics(session: LiveSession | undefined): AttackAnalytics {
       totalFrames: normalF + maliciousF,
       prediction: w.prediction,
       anomalyScore: w.anomaly_score,
+      isEstimated: true, // 0x100 is shared during Mode 1
     };
   });
-
-  // ── 10. Latency data points ───────────────────────────────────────────────
-  const latencyPoints: LatencyDataPoint[] = incidents.map((inc) => ({
-    incidentId: inc.incident_id,
-    detectionWindowCount: inc.window_count ?? 1,
-    attackMode: attack?.mode ?? null,
-    severity: inc.severity,
-  }));
 
   return {
     totalAttackAttempts,
     totalAttacksDetected,
     successfulTerminations,
     failedTerminations,
-    normalTrafficInterruptions: normalInterrupted,
-    avgDetectionWindowCount,
-    normalFramesDuringAttack,
-    normalFramesAfterMitigation,
-    unconfirmedAnomalyWindows,
+    normalTrafficInterruptions,
+    avgResponseLatencyMs,
+    estimatedNormalFramesDuringAttack,
+    estimatedNormalFramesAfterMitigation,
+    isFrameAttributionEstimated: true,
+    uncorrelatedAnomalyWindows,
+    falsePositiveStatus: "UNAVAILABLE",
+    falsePositiveNote: "Ground truth mechanism unavailable on uninstrumented live virtual CAN bus",
     mode1Stats,
     mode2Stats,
     trafficTimeSeries,
@@ -309,7 +399,7 @@ function deriveAnalytics(session: LiveSession | undefined): AttackAnalytics {
     hasIncidents: incidents.length > 0,
     recoveryVerified: recovery?.state === "RECOVERED",
     verifiedNormalWindows: recovery?.normal_windows ?? 0,
-    currentAttackMode: attack?.mode ?? null,
+    currentAttackMode: session.attack?.mode ?? null,
     recoveryState: recovery?.state ?? "NOT_STARTED",
   };
 }
@@ -326,4 +416,3 @@ export function useAttackAnalytics(session: LiveSession | undefined): AttackAnal
 
 // Also export the pure function for unit testing without React
 export { deriveAnalytics };
-
