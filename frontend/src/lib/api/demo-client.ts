@@ -335,6 +335,18 @@ export function createDemoClient(): ApiClient {
         async startLiveAttack(_id, _mode) {
       throw new ApiError("Attack simulation is available only in backend API mode.", 501);
     },
+    async stopLiveAttack(_id) {
+      return { state: "STOPPED" };
+    },
+    async startLiveNormal(_id, _intervalMs) {
+      throw new ApiError("Normal traffic simulation is available only in backend API mode.", 501);
+    },
+    async stopLiveNormal(_id) {
+      return { state: "STOPPED" };
+    },
+    async stopLiveSimulations(_id) {
+      return { attack: { state: "STOPPED" }, normal: { state: "STOPPED" } };
+    },
 
     async planResponse(_analysisId, _incidentId) {
       throw new ApiError(

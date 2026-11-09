@@ -10,6 +10,10 @@ export const endpoints = {
   live: (id: string) => `/api/live/${encodeURIComponent(id)}`,
   liveStop: (id: string) => `/api/live/${encodeURIComponent(id)}/stop`,
   liveAttack: (id: string) => `/api/live/${encodeURIComponent(id)}/attack`,
+  liveAttackStop: (id: string) => `/api/live/${encodeURIComponent(id)}/attack/stop`,
+  liveNormal: (id: string) => `/api/live/${encodeURIComponent(id)}/normal`,
+  liveNormalStop: (id: string) => `/api/live/${encodeURIComponent(id)}/normal/stop`,
+  liveSimulationsStop: (id: string) => `/api/live/${encodeURIComponent(id)}/simulations/stop`,
 
   responsePlan: (analysisId: string, incidentId: string) =>
   `/api/analyses/${encodeURIComponent(analysisId)}/incidents/${encodeURIComponent(incidentId)}/response/plan`,

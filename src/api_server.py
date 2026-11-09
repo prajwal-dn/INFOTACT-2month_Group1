@@ -121,6 +121,10 @@ class StartAttackRequest(BaseModel):
     mode: Literal[1, 2] = 1
 
 
+class StartNormalRequest(BaseModel):
+    interval_ms: int = Field(default=100, ge=1, le=60000)
+
+
 def check_interface_state(iface_name: str = "vcan0") -> str:
     """Inspect the host Linux network interface state (UP, DOWN, MISSING, UNKNOWN)."""
     # Check via sysfs
@@ -604,6 +608,65 @@ def start_live_attack(session_id: str, request: StartAttackRequest):
     except FileNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        )
+
+
+@app.post("/api/live/{session_id}/normal")
+def start_live_normal(session_id: str, request: Optional[StartNormalRequest] = None):
+    """Start a backend-owned normal traffic generator on isolated vcan0."""
+    interval_ms = request.interval_ms if request else 100
+    try:
+        return live_manager.start_normal(session_id, interval_ms=interval_ms)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        )
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        )
+
+
+@app.post("/api/live/{session_id}/normal/stop")
+def stop_live_normal(session_id: str):
+    """Stop the backend-owned normal traffic generator on vcan0."""
+    try:
+        return live_manager.stop_normal(session_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        )
+
+
+@app.post("/api/live/{session_id}/attack/stop")
+def stop_live_attack(session_id: str):
+    """Stop the backend-owned attack simulator on vcan0."""
+    try:
+        return live_manager.stop_attack(session_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        )
+
+
+@app.post("/api/live/{session_id}/simulations/stop")
+def stop_live_simulations(session_id: str):
+    """Stop all running simulation generators without stopping the live capture session."""
+    try:
+        return live_manager.stop_all_simulations(session_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         )
 

@@ -81,6 +81,35 @@ export function useStartLiveAttack() {
   });
 }
 
+export function useStopLiveAttack() {
+  const { client } = useApi();
+  return useMutation({
+    mutationFn: (id: string) => client.stopLiveAttack(id),
+  });
+}
+
+export function useStartLiveNormal() {
+  const { client } = useApi();
+  return useMutation({
+    mutationFn: (input: { id: string; intervalMs?: number }) =>
+      client.startLiveNormal(input.id, input.intervalMs),
+  });
+}
+
+export function useStopLiveNormal() {
+  const { client } = useApi();
+  return useMutation({
+    mutationFn: (id: string) => client.stopLiveNormal(id),
+  });
+}
+
+export function useStopLiveSimulations() {
+  const { client } = useApi();
+  return useMutation({
+    mutationFn: (id: string) => client.stopLiveSimulations(id),
+  });
+}
+
 export function useStopLive() {
   const { client } = useApi();
   const storeAnalysis = useStoreAnalysis();

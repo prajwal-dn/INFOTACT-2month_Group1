@@ -198,6 +198,40 @@ describe("deriveEvents", () => {
     expect(verified!.title).toContain("verified");
   });
 
+  it("emits normal traffic generator running and stopped events", () => {
+    const runningSession: LiveSession = {
+      ...BASE_SESSION,
+      normal: { state: "RUNNING", pid: 9876, interval_ms: 100 },
+    };
+    const runningEvents = deriveEvents(runningSession);
+    const normalEvent = runningEvents.find((e) => e.id === `normal-running:${runningSession.id}`);
+    expect(normalEvent).toBeDefined();
+    expect(normalEvent!.title).toContain("Normal CAN traffic generator running");
+    expect(normalEvent!.can_ids).toEqual(["0x100", "0x101", "0x102"]);
+
+    const stoppedSession: LiveSession = {
+      ...BASE_SESSION,
+      normal: { state: "STOPPED", return_code: 0 },
+    };
+    const stoppedEvents = deriveEvents(stoppedSession);
+    const stopEvent = stoppedEvents.find((e) => e.id === `normal-stopped:${stoppedSession.id}`);
+    expect(stopEvent).toBeDefined();
+    expect(stopEvent!.title).toContain("Normal CAN traffic generator stopped");
+  });
+
+  it("emits concurrent-simulation event when both normal and attack are RUNNING", () => {
+    const session: LiveSession = {
+      ...BASE_SESSION,
+      normal: { state: "RUNNING", pid: 1111 },
+      attack: { state: "RUNNING", mode: 1, pid: 2222 },
+    };
+    const events = deriveEvents(session);
+    const concurrent = events.find((e) => e.id === `concurrent-simulation:${session.id}`);
+    expect(concurrent).toBeDefined();
+    expect(concurrent!.title).toBe("Concurrent traffic simulation active");
+    expect(concurrent!.severity).toBe("warning");
+  });
+
   it("produces no duplicate events when called twice with the same session object", () => {
     const session: LiveSession = {
       ...BASE_SESSION,

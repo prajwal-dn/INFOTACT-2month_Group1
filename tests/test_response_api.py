@@ -1,4 +1,6 @@
 import pytest
+from pathlib import Path
+import subprocess
 from fastapi.testclient import TestClient
 
 from src import api_server
@@ -371,3 +373,72 @@ def test_automatic_live_incident_response_end_to_end(
     )
     assert result["status"] == result["verification"]["status"]
     assert "recovery" in result["verification"]
+
+
+def test_live_normal_traffic_api_lifecycle(client, monkeypatch):
+    """Test start, duplicate, and stop for normal traffic and all simulations."""
+    class MockProcess:
+        pid = 3344
+        returncode = None
+        def poll(self):
+            return self.returncode
+        def send_signal(self, sig):
+            pass
+        def wait(self, timeout=None):
+            self.returncode = 0
+            return 0
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: MockProcess())
+
+    manager = api_server.live_manager
+    manager._active_session = {
+        "id": "live_api_sim_test",
+        "interface": "vcan0",
+        "state": "capturing",
+        "capture_file": "/tmp/test.csv",
+        "started_at": "2026-11-09T10:00:00Z",
+        "frames_captured": 100,
+        "windows": [],
+        "pending_window_index": None,
+        "message": None,
+        "normal": {"state": "NOT_STARTED"},
+        "attack": {"state": "NOT_STARTED"},
+        "recovery": {"state": "NOT_STARTED", "normal_windows": 0, "required_normal_windows": 2},
+    }
+    # Mock normal_path and attack_path as executable
+    manager.normal_path = Path(__file__)
+    manager.attack_path = Path(__file__)
+
+    # Start normal traffic
+    start_resp = client.post("/api/live/live_api_sim_test/normal", json={"interval_ms": 100})
+    assert start_resp.status_code == 200
+    assert start_resp.json()["state"] == "RUNNING"
+    assert start_resp.json()["pid"] == 3344
+
+    # Duplicate normal start should return 409
+    dup_resp = client.post("/api/live/live_api_sim_test/normal", json={"interval_ms": 100})
+    assert dup_resp.status_code == 409
+
+    # Snapshot poll should show normal is RUNNING
+    poll_resp = client.get("/api/live/live_api_sim_test")
+    assert poll_resp.status_code == 200
+    assert poll_resp.json()["normal"]["state"] == "RUNNING"
+
+    # Stop normal traffic independently
+    stop_resp = client.post("/api/live/live_api_sim_test/normal/stop")
+    assert stop_resp.status_code == 200
+    assert stop_resp.json()["state"] == "STOPPED"
+
+    # Start both and test stop_all_simulations
+    manager._normal_proc = MockProcess()
+    manager._attack_proc = MockProcess()
+    manager._active_session["normal"] = {"state": "RUNNING", "pid": 3344}
+    manager._active_session["attack"] = {"state": "RUNNING", "pid": 3345, "mode": 1}
+
+    stop_all = client.post("/api/live/live_api_sim_test/simulations/stop")
+    assert stop_all.status_code == 200
+    assert stop_all.json()["normal"]["state"] == "STOPPED"
+    assert stop_all.json()["attack"]["state"] == "STOPPED"
+    assert manager._normal_proc is None
+    assert manager._attack_proc is None
+

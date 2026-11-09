@@ -83,6 +83,8 @@ class LiveSessionManager:
         model_path: Optional[Path] = None,
         captures_dir: Optional[Path] = None,
         sniffer_path: Optional[Path] = None,
+        attack_path: Optional[Path] = None,
+        normal_path: Optional[Path] = None,
         socket_path: str = SOCKET_PATH,
     ):
         self.analysis_service = analysis_service
@@ -90,12 +92,15 @@ class LiveSessionManager:
         self.captures_dir = captures_dir or (ROOT / "data")
         self.captures_dir.mkdir(parents=True, exist_ok=True)
         self.sniffer_path = sniffer_path or (ROOT / "build" / "can_sniffer")
+        self.attack_path = attack_path or (ROOT / "build" / "attack_simulator")
+        self.normal_path = normal_path or (ROOT / "build" / "normal_traffic")
         self.socket_path = socket_path
 
         self._lock = threading.RLock()
         self._active_session: Optional[Dict[str, Any]] = None
         self._sniffer_proc: Optional[subprocess.Popen] = None
         self._attack_proc: Optional[subprocess.Popen] = None
+        self._normal_proc: Optional[subprocess.Popen] = None
         self._server_sock: Optional[socket.socket] = None
         self._receiver_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
@@ -134,7 +139,7 @@ class LiveSessionManager:
             if self._attack_proc and self._attack_proc.poll() is None:
                 raise RuntimeError("An attack simulator is already running.")
 
-            attack_path = ROOT / "build" / "attack_simulator"
+            attack_path = self.attack_path
 
             if not attack_path.is_file() or not os.access(attack_path, os.X_OK):
                 raise FileNotFoundError("Attack simulator binary is unavailable.")
@@ -158,6 +163,94 @@ class LiveSessionManager:
                 "stopped_after_window_index": None,
             }
             return dict(session["attack"])
+
+    def start_normal(self, session_id: str, interval_ms: int = 100) -> Dict[str, Any]:
+        """Start a backend-owned normal traffic generator on vcan0."""
+        if not (1 <= interval_ms <= 60000):
+            raise ValueError("Interval must be between 1 and 60000 ms.")
+
+        with self._lock:
+            session = self._active_session
+
+            if not session or session["id"] != session_id:
+                raise ValueError("Live session not found.")
+
+            if session.get("interface") != "vcan0":
+                raise ValueError("Traffic generation is restricted to vcan0.")
+
+            if session.get("state") != "capturing":
+                raise ValueError("Live capture is not running.")
+
+            if self._normal_proc and self._normal_proc.poll() is None:
+                raise RuntimeError("A normal traffic generator is already running.")
+
+            normal_path = self.normal_path
+
+            if not normal_path.is_file() or not os.access(normal_path, os.X_OK):
+                raise FileNotFoundError("Normal traffic generator binary is unavailable.")
+
+            self._normal_proc = subprocess.Popen(
+                [str(normal_path), str(interval_ms)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            session["normal"] = {
+                "pid": self._normal_proc.pid,
+                "state": "RUNNING",
+                "interval_ms": interval_ms,
+            }
+            return dict(session["normal"])
+
+    def stop_normal(self, session_id: str) -> Dict[str, Any]:
+        """Stop only the normal traffic generator owned by this manager."""
+        with self._lock:
+            session = self._active_session
+
+            if not session or session["id"] != session_id:
+                raise ValueError("Live session not found.")
+
+            proc = self._normal_proc
+
+            if proc is None:
+                return {"state": "NOT_RUNNING"}
+
+            if proc.poll() is None:
+                proc.send_signal(signal.SIGINT)
+
+                try:
+                    proc.wait(timeout=3.0)
+                except subprocess.TimeoutExpired:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=2.0)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait(timeout=2.0)
+
+            self._normal_proc = None
+
+            session["normal"] = {
+                **session.get("normal", {}),
+                "state": "STOPPED",
+                "return_code": proc.returncode,
+            }
+            return dict(session["normal"])
+
+    def stop_all_simulations(self, session_id: str) -> Dict[str, Any]:
+        """Stop all simulations (normal and attack) without stopping the capture session."""
+        with self._lock:
+            session = self._active_session
+            if not session or session["id"] != session_id:
+                raise ValueError("Live session not found.")
+
+        attack_res = self.stop_attack(session_id)
+        normal_res = self.stop_normal(session_id)
+
+        return {
+            "attack": attack_res,
+            "normal": normal_res,
+        }
 
     def stop_attack(self, session_id: str) -> Dict[str, Any]:
         """Stop only the attack process owned by this manager."""
@@ -292,6 +385,24 @@ class LiveSessionManager:
                 return None
 
             s = self._active_session
+
+            # Reconcile child processes that exited or crashed independently
+            if self._normal_proc is not None and self._normal_proc.poll() is not None:
+                s["normal"] = {
+                    **s.get("normal", {}),
+                    "state": "STOPPED",
+                    "return_code": self._normal_proc.returncode,
+                }
+                self._normal_proc = None
+
+            if self._attack_proc is not None and self._attack_proc.poll() is not None:
+                s["attack"] = {
+                    **s.get("attack", {}),
+                    "state": "STOPPED",
+                    "return_code": self._attack_proc.returncode,
+                }
+                self._attack_proc = None
+
             # Return snapshot matching Zod LiveSession schema
             return {
                 "id": s["id"],
@@ -303,6 +414,7 @@ class LiveSessionManager:
                 "frames_captured": s["frames_captured"],
                 "windows": list(s["windows"]),
                 "incidents": list(s.get("incidents", [])),
+                "normal": dict(s.get("normal", {"state": "NOT_STARTED"})),
                 "attack": dict(s.get("attack", {"state": "NOT_STARTED"})),
                 "recovery": dict(s.get("recovery", {
                     "state": "NOT_STARTED",
@@ -350,6 +462,7 @@ class LiveSessionManager:
                 "frames_captured": 0,
                 "windows": [],
                 "incidents": [],
+                "normal": {"state": "NOT_STARTED"},
                 "attack": {"state": "NOT_STARTED"},
                 "recovery": {
                     "state": "NOT_STARTED",
@@ -837,8 +950,9 @@ class LiveSessionManager:
 
     def stop_session(self, session_id: str) -> Dict[str, Any]:
         """Stop capture, discard final incomplete window, score all frames, return AnalysisResult."""
-        # Stop only the attack simulator owned by this manager.
+        # Stop any simulators owned by this manager.
         self.stop_attack(session_id)
+        self.stop_normal(session_id)
 
         with self._lock:
             if not self._active_session or self._active_session["id"] != session_id:

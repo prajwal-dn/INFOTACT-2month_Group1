@@ -168,9 +168,45 @@ function deriveEvents(session: LiveSession | undefined): TimelineEvent[] {
     }
   }
 
-  // ── 4. Attack simulator events ───────────────────────────────────────────
+  // ── 4. Generator & simulator events ──────────────────────────────────────
+  const normal = session.normal;
   const attack = session.attack;
   const recovery = session.recovery;
+
+  if (normal && normal.state !== "NOT_STARTED") {
+    if (normal.state === "RUNNING") {
+      events.push({
+        id: `normal-running:${session.id}`,
+        timestamp: session.started_at,
+        category: "system",
+        severity: "normal",
+        title: "Normal CAN traffic generator running",
+        description: `Legitimate powertrain traffic active (RPM 0x100, Speed 0x101, Coolant 0x102) · PID ${normal.pid ?? "—"}`,
+        can_ids: ["0x100", "0x101", "0x102"],
+      });
+    } else if (normal.state === "STOPPED") {
+      events.push({
+        id: `normal-stopped:${session.id}`,
+        timestamp: session.started_at,
+        category: "system",
+        severity: "info",
+        title: "Normal CAN traffic generator stopped",
+        description: `Legitimate traffic simulation stopped · return code ${normal.return_code ?? 0}`,
+      });
+    }
+  }
+
+  if (normal?.state === "RUNNING" && attack?.state === "RUNNING") {
+    events.push({
+      id: `concurrent-simulation:${session.id}`,
+      timestamp: session.started_at,
+      category: "system",
+      severity: "warning",
+      title: "Concurrent traffic simulation active",
+      description: `Normal powertrain messages flowing simultaneously with Attack Mode ${attack.mode ?? 1}`,
+      can_ids: attack.mode === 1 ? ["0x100", "0x101", "0x102"] : ["0x100", "0x101", "0x102", "0x999"],
+    });
+  }
 
   if (attack && attack.state !== "NOT_STARTED") {
     // Derive a timestamp from the window at stopped_after_window_index (if available)

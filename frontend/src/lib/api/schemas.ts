@@ -226,6 +226,13 @@ export const LiveAttack = z.object({
   pid: z.number().optional(),
   return_code: z.number().nullable().optional(),
 });
+export const LiveNormal = z.object({
+  state: z.string(),
+  pid: z.number().optional(),
+  return_code: z.number().nullable().optional(),
+  interval_ms: z.number().optional(),
+});
+export type LiveNormal = z.infer<typeof LiveNormal>;
 export const LiveRecovery = z.object({
   state: z.string(),
   normal_windows: z.number().optional(),
@@ -238,6 +245,13 @@ export const LiveAttackResult = z.object({
   state: z.string(),
 });
 export type LiveAttackResult = z.infer<typeof LiveAttackResult>;
+
+export const LiveNormalResult = z.object({
+  pid: z.number().optional(),
+  state: z.string(),
+  interval_ms: z.number().optional(),
+});
+export type LiveNormalResult = z.infer<typeof LiveNormalResult>;
 
 export const LiveIncident = Incident.passthrough().extend({
   analysis_id: z.string().optional(),
@@ -261,6 +275,7 @@ export const LiveSession = z.object({
   pending_window_index: z.number().nullable(),
   message: z.string().nullable(),
   incidents: z.array(LiveIncident).optional(),
+  normal: LiveNormal.optional(),
   attack: LiveAttack.optional(),
   recovery: LiveRecovery.optional(),
 });

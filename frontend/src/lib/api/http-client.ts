@@ -14,6 +14,7 @@ import {
   CapturePreset,
   LiveSession,
   LiveAttackResult,
+  LiveNormalResult,
   SystemStatus,
 } from "./schemas";
 
@@ -93,6 +94,12 @@ export function createHttpClient(baseUrl: string, fetchImpl: typeof fetch = fetc
     getLiveSession: (id) => json(LiveSession, endpoints.live(id)),
     stopLiveCapture: (id) => json(AnalysisResult, endpoints.liveStop(id), post()),
     startLiveAttack: (id, mode) => json(LiveAttackResult, endpoints.liveAttack(id), post({ mode })),
+    stopLiveAttack: (id) => json(z.object({ state: z.string() }).passthrough(), endpoints.liveAttackStop(id), post()),
+    startLiveNormal: (id, intervalMs) =>
+      json(LiveNormalResult, endpoints.liveNormal(id), post(intervalMs ? { interval_ms: intervalMs } : {})),
+    stopLiveNormal: (id) => json(z.object({ state: z.string() }).passthrough(), endpoints.liveNormalStop(id), post()),
+    stopLiveSimulations: (id) =>
+      json(z.object({ attack: z.unknown(), normal: z.unknown() }), endpoints.liveSimulationsStop(id), post()),
     planResponse: (analysisId, incidentId) =>
     json(ResponsePlan, endpoints.responsePlan(analysisId, incidentId), post()),
 
