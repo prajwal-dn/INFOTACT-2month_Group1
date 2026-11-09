@@ -15,6 +15,10 @@ import { SecurityEventTimeline } from "@/components/app/SecurityEventTimeline";
 import { AttackPreventionAnalytics } from "@/components/app/AttackPreventionAnalytics";
 import { IncidentReportModal } from "@/components/app/IncidentReportModal";
 import { IncidentHistoryTable } from "@/components/app/IncidentHistoryTable";
+import { SocOverviewDashboard } from "@/components/app/SocOverviewDashboard";
+import { RealTimeTrafficMonitor } from "@/components/app/RealTimeTrafficMonitor";
+import { ThreatMonitoringPanel } from "@/components/app/ThreatMonitoringPanel";
+import { SystemHealthMonitor } from "@/components/app/SystemHealthMonitor";
 import { useSecurityTimeline } from "@/lib/use-security-timeline";
 import { useAttackAnalytics } from "@/lib/use-attack-analytics";
 import { logEvent } from "@/lib/audit-log";
@@ -237,6 +241,15 @@ function LiveMonitor() {
         }
       />
 
+      {/* Phase 6: SOC Overview Dashboard */}
+      <div className="mb-6">
+        <SocOverviewDashboard
+          session={s ?? null}
+          status={status.data}
+          totalHistoricalIncidents={allIncidents.data?.length ?? 0}
+        />
+      </div>
+
       <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
         <div className="space-y-6">
           <Panel title="Pre-flight checks">
@@ -415,9 +428,31 @@ function LiveMonitor() {
               )}
             </Panel>
           )}
+
+          {/* Phase 6: System Health Monitoring */}
+          <SystemHealthMonitor
+            status={status.data}
+            session={s ?? null}
+            isStatusError={status.isError}
+          />
         </div>
 
         <div className="min-w-0 space-y-6">
+          {/* Phase 6: Threat Monitoring Panel */}
+          <ThreatMonitoringPanel
+            windows={windows}
+            incidents={confirmedIncidents}
+            capturing={capturing}
+            onOpenAlertModal={(inc) => {
+              setActiveIncident(inc);
+              setIsAlertModalOpen(true);
+            }}
+            onOpenReport={(inc) => {
+              setSelectedReportIncident(inc);
+              setIsReportModalOpen(true);
+            }}
+          />
+
           {confirmedIncidents.length > 0 && (
             <div className="surface flex flex-wrap items-center justify-between gap-3 border-l-4 border-l-destructive bg-destructive/10 p-4">
               <div className="flex items-center gap-3">
@@ -488,6 +523,13 @@ function LiveMonitor() {
 
           <MetricGrid
             metrics={s ? { total: windows.length, normal: windows.length - anomalies, anomalies, rate: windows.length ? (anomalies / windows.length) * 100 : 0 } : null}
+          />
+
+          {/* Phase 6: Real-Time CAN Traffic Monitoring */}
+          <RealTimeTrafficMonitor
+            windows={windows}
+            capturing={capturing}
+            pendingWindowIndex={s?.pending_window_index}
           />
 
           {session.isError && <ErrorState error={session.error} />}
