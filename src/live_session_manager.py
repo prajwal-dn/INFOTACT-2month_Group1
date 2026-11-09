@@ -109,6 +109,8 @@ class LiveSessionManager:
         self._shutdown_lock = threading.Lock()
         self._shutdown_requested = False
         self._shutdown_complete = False
+        self._processed_incident_ids = set()
+        self._response_audit_trail: List[Dict[str, Any]] = []
         self._incident_worker = threading.Thread(
             target=self._incident_worker_loop,
             daemon=True,
@@ -242,7 +244,10 @@ class LiveSessionManager:
                         proc.wait(timeout=2.0)
                     except subprocess.TimeoutExpired:
                         proc.kill()
-                        proc.wait(timeout=2.0)
+                        try:
+                            proc.wait(timeout=2.0)
+                        except subprocess.TimeoutExpired:
+                            pass
 
             self._normal_proc = None
 
@@ -302,7 +307,10 @@ class LiveSessionManager:
                         proc.wait(timeout=2.0)
                     except subprocess.TimeoutExpired:
                         proc.kill()
-                        proc.wait(timeout=2.0)
+                        try:
+                            proc.wait(timeout=2.0)
+                        except subprocess.TimeoutExpired:
+                            pass
 
             self._attack_proc = None
 
@@ -368,6 +376,31 @@ class LiveSessionManager:
                 if job is None:
                     return
 
+                incident_id = job["incident"]["incident_id"]
+
+                # Prevent duplicate response workers for the same incident
+                with self._lock:
+                    if incident_id in self._processed_incident_ids:
+                        continue
+                    self._processed_incident_ids.add(incident_id)
+
+                    # Assess pre-mitigation continuity
+                    sniffer_proc = self._sniffer_proc
+                    sniffer_pre_alive = (
+                        sniffer_proc is not None
+                        and getattr(sniffer_proc, "poll", lambda: None)() is None
+                    )
+                    sniffer_continuity_status = "PASS" if sniffer_pre_alive else "FAIL"
+
+                    normal_proc = self._normal_proc
+                    normal_initially_active = (
+                        normal_proc is not None
+                        and getattr(normal_proc, "poll", lambda: None)() is None
+                    )
+                    normal_initial_pid = getattr(normal_proc, "pid", None) if normal_initially_active else None
+
+                    target_pid = getattr(self._attack_proc, "pid", None) if self._attack_proc else None
+
                 response_initiated_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
                 # Stop only the attack process launched by this manager.
@@ -403,6 +436,43 @@ class LiveSessionManager:
                     "attack_mode": job.get("attack_mode"),
                 }
 
+                # Evaluate post-mitigation continuity & confirmed process exit
+                with self._lock:
+                    if normal_initially_active:
+                        normal_still_alive = (
+                            self._normal_proc is not None
+                            and getattr(self._normal_proc, "poll", lambda: None)() is None
+                        )
+                        normal_pid_preserved = (
+                            self._normal_proc is not None
+                            and getattr(self._normal_proc, "pid", None) == normal_initial_pid
+                        )
+                        normal_continuity_status = "PASS" if (normal_still_alive and normal_pid_preserved) else "FAIL"
+                    else:
+                        normal_continuity_status = "NOT_APPLICABLE"
+
+                    confirmed_mitigation = (attack_result.get("return_code") == 0)
+                    final_status = "MITIGATED" if confirmed_mitigation else "FAILED"
+
+                    audit_entry = {
+                        "audit_id": f"resp_{uuid.uuid4().hex[:8]}",
+                        "incident_id": incident_id,
+                        "response_action": "TERMINATE_ATTACK_PROCESS",
+                        "process_pid": target_pid,
+                        "action_initiation_timestamp": response_initiated_utc,
+                        "process_termination_timestamp": attack_terminated_utc,
+                        "return_code": attack_result.get("return_code"),
+                        "termination_reason": attack_result.get("termination_reason", "AUTOMATIC_RESPONSE"),
+                        "sniffer_continuity_status": sniffer_continuity_status,
+                        "normal_traffic_continuity_status": normal_continuity_status,
+                        "recovery_verification_result": "IN_PROGRESS",
+                        "final_response_status": final_status,
+                        "detection_latency_ms": detection_ms,
+                        "mitigation_latency_ms": mitigation_ms,
+                        "total_latency_ms": detection_to_termination_ms,
+                    }
+                    self._response_audit_trail.append(audit_entry)
+
                 self.analysis_service.register_live_incident(
                     analysis_id=job["analysis_id"],
                     incident=job["incident"],
@@ -420,6 +490,7 @@ class LiveSessionManager:
                 with self._lock:
                     session = self._active_session
                     if session and session["id"] == job["session_id"]:
+                        session.setdefault("response_audit_trail", []).append(dict(audit_entry))
                         for item in session.get("incidents", []):
                             if item.get("analysis_id") == job["analysis_id"]:
                                 item["analysis_registered"] = True
@@ -502,6 +573,121 @@ class LiveSessionManager:
                         break
                 self._attack_proc = None
 
+            # Phase 7: Automated Response Validation & Resilience Metrics
+            audit_trail = [dict(a) for a in s.get("response_audit_trail", [])]
+            incidents = s.get("incidents", [])
+            attack_history = s.get("attack_history", [])
+            recovery = s.get("recovery", {})
+            auto_responses = [a for a in attack_history if a.get("termination_reason") == "AUTOMATIC_RESPONSE"]
+
+            # 1. Confirmed security incident creation
+            if incidents:
+                chk_incident = {"status": "PASS", "detail": f"{len(incidents)} confirmed incident(s) generated"}
+            else:
+                chk_incident = {"status": "NOT VERIFIED", "detail": "No confirmed incidents recorded"}
+
+            # 2. Automated response initiation
+            if auto_responses or audit_trail:
+                chk_initiation = {"status": "PASS", "detail": f"{max(len(auto_responses), len(audit_trail))} response(s) initiated"}
+            elif incidents:
+                chk_initiation = {"status": "RUNNING", "detail": "Awaiting response initiation"}
+            else:
+                chk_initiation = {"status": "NOT VERIFIED", "detail": "No response triggers required"}
+
+            # 3. Attack simulator termination
+            if auto_responses:
+                all_stopped = all(a.get("state") == "STOPPED" for a in auto_responses)
+                chk_attack_term = {
+                    "status": "PASS" if all_stopped else "FAIL",
+                    "detail": f"{len(auto_responses)} attack process(es) terminated",
+                }
+            elif s.get("attack", {}).get("state") == "RUNNING":
+                chk_attack_term = {"status": "RUNNING", "detail": "Attack simulator actively running"}
+            else:
+                chk_attack_term = {"status": "NOT VERIFIED", "detail": "No attack simulator active"}
+
+            # 4. Actual process exit status (strict return_code == 0 check)
+            if auto_responses:
+                clean_exits = [a for a in auto_responses if a.get("return_code") == 0]
+                if len(clean_exits) == len(auto_responses) and clean_exits:
+                    chk_exit_code = {"status": "PASS", "detail": f"All {len(clean_exits)} process(es) confirmed exit code 0"}
+                else:
+                    chk_exit_code = {"status": "FAIL", "detail": f"{len(auto_responses) - len(clean_exits)} termination(s) non-zero or unconfirmed"}
+            else:
+                chk_exit_code = {"status": "NOT VERIFIED", "detail": "No attack terminations to verify"}
+
+            # 5. Sniffer process continuity
+            sniffer_alive = self._sniffer_proc is not None and self._sniffer_proc.poll() is None
+            if s.get("state") == "capturing" and sniffer_alive:
+                chk_sniffer = {"status": "PASS", "detail": f"Sniffer active (PID {self._sniffer_proc.pid}, {s.get('frames_captured', 0)} frames)"}
+            elif s.get("state") == "capturing" and not sniffer_alive:
+                chk_sniffer = {"status": "FAIL", "detail": "Sniffer subprocess exited unexpectedly"}
+            else:
+                chk_sniffer = {"status": "NOT VERIFIED", "detail": f"Session state: {s.get('state')}"}
+
+            # 6. Normal traffic generator continuity
+            normal_state = s.get("normal", {}).get("state")
+            normal_rc = s.get("normal", {}).get("return_code")
+            if normal_state == "RUNNING" and self._normal_proc is not None and self._normal_proc.poll() is None:
+                chk_normal = {"status": "PASS", "detail": f"Normal traffic running continuously (PID {self._normal_proc.pid})"}
+            elif normal_rc is not None and normal_rc != 0:
+                chk_normal = {"status": "FAIL", "detail": f"Normal generator crashed with exit code {normal_rc}"}
+            else:
+                chk_normal = {"status": "NOT VERIFIED", "detail": "Normal generator not active concurrently"}
+
+            # 7. Consecutive normal-window recovery verification
+            rec_state = recovery.get("state", "NOT_STARTED")
+            if rec_state == "RECOVERED":
+                chk_recovery = {"status": "PASS", "detail": f"Recovery verified ({recovery.get('normal_windows', 2)}/2 consecutive normal windows)"}
+            elif rec_state == "ATTACK_STOPPED_VERIFYING":
+                chk_recovery = {"status": "RUNNING", "detail": f"Verifying ({recovery.get('normal_windows', 0)}/2 consecutive normal windows)"}
+            else:
+                chk_recovery = {"status": "NOT VERIFIED", "detail": f"Recovery state: {rec_state}"}
+
+            all_chk_statuses = [
+                chk_incident["status"],
+                chk_initiation["status"],
+                chk_attack_term["status"],
+                chk_exit_code["status"],
+                chk_sniffer["status"],
+                chk_normal["status"],
+                chk_recovery["status"],
+            ]
+            if "FAIL" in all_chk_statuses:
+                overall_validation = "FAIL"
+            elif "RUNNING" in all_chk_statuses:
+                overall_validation = "RUNNING"
+            elif any(st == "PASS" for st in all_chk_statuses):
+                overall_validation = "PASS"
+            else:
+                overall_validation = "NOT VERIFIED"
+
+            # Reliability metrics
+            total_attempts = len(audit_trail) if audit_trail else len(auto_responses)
+            confirmed_mitigations = len([a for a in auto_responses if a.get("return_code") == 0])
+            failed_mitigations = max(0, total_attempts - confirmed_mitigations)
+            unexpected_exits = len([a for a in attack_history if a.get("termination_reason") in ("PROCESS_CRASH", "NATURAL_EXIT")])
+
+            if rec_state == "RECOVERED":
+                recovery_success_rate = 100.0
+            elif rec_state == "ATTACK_STOPPED_VERIFYING":
+                recovery_success_rate = None
+            else:
+                recovery_success_rate = None
+
+            det_latencies = [
+                inc["response_latency"]["detection_ms"]
+                for inc in incidents
+                if inc.get("response_latency", {}).get("detection_ms") is not None
+            ]
+            mit_latencies = [
+                inc["response_latency"]["mitigation_ms"]
+                for inc in incidents
+                if inc.get("response_latency", {}).get("mitigation_ms") is not None
+            ]
+            avg_det_ms = round(sum(det_latencies) / len(det_latencies), 1) if det_latencies else None
+            avg_mit_ms = round(sum(mit_latencies) / len(mit_latencies), 1) if mit_latencies else None
+
             # Return snapshot matching Zod LiveSession schema
             return {
                 "id": s["id"],
@@ -522,6 +708,29 @@ class LiveSessionManager:
                     "normal_windows": 0,
                     "required_normal_windows": 2,
                 })),
+                "response_audit_trail": audit_trail,
+                "response_validation": {
+                    "overall_status": overall_validation,
+                    "checks": {
+                        "confirmed_incident_creation": chk_incident,
+                        "automated_response_initiation": chk_initiation,
+                        "attack_simulator_termination": chk_attack_term,
+                        "actual_process_exit_status": chk_exit_code,
+                        "sniffer_process_continuity": chk_sniffer,
+                        "normal_traffic_continuity": chk_normal,
+                        "recovery_verification": chk_recovery,
+                    },
+                },
+                "response_reliability": {
+                    "total_response_attempts": total_attempts,
+                    "confirmed_successful_mitigations": confirmed_mitigations,
+                    "failed_mitigations": failed_mitigations,
+                    "unexpected_attack_process_exits": unexpected_exits,
+                    "recovery_verification_success_rate": recovery_success_rate,
+                    "average_detection_latency_ms": avg_det_ms,
+                    "average_mitigation_latency_ms": avg_mit_ms,
+                    "average_recovery_duration_ms": None,
+                },
                 "pending_window_index": s["pending_window_index"],
                 "message": s["message"],
             }
@@ -551,6 +760,7 @@ class LiveSessionManager:
             started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
             self._stop_event.clear()
+            self._processed_incident_ids.clear()
             self._active_session = {
                 "id": session_id,
                 "data_source": "backend",
@@ -567,6 +777,7 @@ class LiveSessionManager:
                 "attack": {"state": "NOT_STARTED"},
                 "attack_history": [],
                 "normal_history": [],
+                "response_audit_trail": [],
                 "recovery": {
                     "state": "NOT_STARTED",
                     "normal_windows": 0,
@@ -1027,9 +1238,26 @@ class LiveSessionManager:
                     recovery["normal_windows"] = recovery.get("normal_windows", 0) + 1
                 else:
                     recovery["normal_windows"] = 0
+                    for audit in session_dict.get("response_audit_trail", []):
+                        if audit.get("recovery_verification_result") == "IN_PROGRESS":
+                            audit["recovery_verification_result"] = "RESET_BY_ANOMALY"
+                    for audit in self._response_audit_trail:
+                        if audit.get("recovery_verification_result") == "IN_PROGRESS":
+                            audit["recovery_verification_result"] = "RESET_BY_ANOMALY"
 
                 if recovery["normal_windows"] >= recovery.get("required_normal_windows", 2):
                     recovery["state"] = "RECOVERED"
+                    recovery["recovery_completed_utc"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                    for audit in session_dict.get("response_audit_trail", []):
+                        if audit.get("recovery_verification_result") in ("IN_PROGRESS", "RESET_BY_ANOMALY"):
+                            audit["recovery_verification_result"] = "PASS"
+                            if audit.get("final_response_status") == "MITIGATED":
+                                audit["final_response_status"] = "VERIFIED_RECOVERED"
+                    for audit in self._response_audit_trail:
+                        if audit.get("recovery_verification_result") in ("IN_PROGRESS", "RESET_BY_ANOMALY"):
+                            audit["recovery_verification_result"] = "PASS"
+                            if audit.get("final_response_status") == "MITIGATED":
+                                audit["final_response_status"] = "VERIFIED_RECOVERED"
 
         open_windows = session_dict.setdefault("open_incident_windows", [])
         open_records = session_dict.setdefault("open_incident_records", [])

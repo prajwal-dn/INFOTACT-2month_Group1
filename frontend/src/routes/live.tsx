@@ -19,6 +19,7 @@ import { SocOverviewDashboard } from "@/components/app/SocOverviewDashboard";
 import { RealTimeTrafficMonitor } from "@/components/app/RealTimeTrafficMonitor";
 import { ThreatMonitoringPanel } from "@/components/app/ThreatMonitoringPanel";
 import { SystemHealthMonitor } from "@/components/app/SystemHealthMonitor";
+import { ResponseReliabilityDashboard } from "@/components/app/ResponseReliabilityDashboard";
 import { useSecurityTimeline } from "@/lib/use-security-timeline";
 import { useAttackAnalytics } from "@/lib/use-attack-analytics";
 import { logEvent } from "@/lib/audit-log";
@@ -554,6 +555,9 @@ function LiveMonitor() {
           </Panel>
 
           <AttackPreventionAnalytics analytics={attackAnalytics} capturing={capturing} />
+
+          {/* Phase 7: Response Validation & Resilience Testing */}
+          <ResponseReliabilityDashboard session={s ?? null} capturing={capturing} />
 
           <SecurityEventTimeline events={timelineEvents} capturing={capturing} />
 

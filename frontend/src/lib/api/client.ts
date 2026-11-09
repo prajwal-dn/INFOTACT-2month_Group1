@@ -11,6 +11,7 @@ import type {
   LiveAttackResult,
   LiveNormalResult,
   LiveSimulationsResult,
+  ResilienceScenarioResult,
   SystemStatus,
 } from "./schemas";
 
@@ -45,6 +46,8 @@ export interface ApiClient {
 
   verifyRecovery(analysisId: string, incidentId: string): Promise<RecoveryVerification>;
 
+  getResilienceScenarios(): Promise<ResilienceScenarioResult[]>;
+  runResilienceScenarios(): Promise<ResilienceScenarioResult[]>;
 }
 
 export class ApiError extends Error {

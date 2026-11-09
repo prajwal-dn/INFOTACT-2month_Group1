@@ -296,6 +296,72 @@ export const ResponseLatency = z.object({
 });
 export type ResponseLatency = z.infer<typeof ResponseLatency>;
 
+/** Phase 7: Response Audit Trail Record */
+export const ResponseAuditRecord = z.object({
+  audit_id: z.string(),
+  incident_id: z.string(),
+  response_action: z.string(),
+  process_pid: z.number().nullable().optional(),
+  action_initiation_timestamp: z.string(),
+  process_termination_timestamp: z.string(),
+  return_code: z.number().nullable().optional(),
+  termination_reason: z.string(),
+  sniffer_continuity_status: z.enum(["PASS", "FAIL"]),
+  normal_traffic_continuity_status: z.enum(["PASS", "FAIL", "NOT_APPLICABLE"]),
+  recovery_verification_result: z.enum(["PASS", "FAIL", "IN_PROGRESS", "RESET_BY_ANOMALY"]),
+  final_response_status: z.enum(["MITIGATED", "VERIFIED_RECOVERED", "FAILED"]),
+  detection_latency_ms: z.number().nullable().optional(),
+  mitigation_latency_ms: z.number().nullable().optional(),
+  total_latency_ms: z.number().nullable().optional(),
+});
+export type ResponseAuditRecord = z.infer<typeof ResponseAuditRecord>;
+
+/** Phase 7: Automated Response Validation Checks */
+export const ValidationCheck = z.object({
+  status: z.enum(["PASS", "FAIL", "RUNNING", "NOT VERIFIED"]),
+  detail: z.string(),
+});
+export type ValidationCheck = z.infer<typeof ValidationCheck>;
+
+export const ResponseValidationStatus = z.object({
+  overall_status: z.enum(["PASS", "FAIL", "RUNNING", "NOT VERIFIED"]),
+  checks: z.object({
+    confirmed_incident_creation: ValidationCheck,
+    automated_response_initiation: ValidationCheck,
+    attack_simulator_termination: ValidationCheck,
+    actual_process_exit_status: ValidationCheck,
+    sniffer_process_continuity: ValidationCheck,
+    normal_traffic_continuity: ValidationCheck,
+    recovery_verification: ValidationCheck,
+  }),
+});
+export type ResponseValidationStatus = z.infer<typeof ResponseValidationStatus>;
+
+/** Phase 7: Response Reliability Metrics */
+export const ResponseReliabilityMetrics = z.object({
+  total_response_attempts: z.number(),
+  confirmed_successful_mitigations: z.number(),
+  failed_mitigations: z.number(),
+  unexpected_attack_process_exits: z.number(),
+  recovery_verification_success_rate: z.number().nullable().optional(),
+  average_detection_latency_ms: z.number().nullable().optional(),
+  average_mitigation_latency_ms: z.number().nullable().optional(),
+  average_recovery_duration_ms: z.number().nullable().optional(),
+});
+export type ResponseReliabilityMetrics = z.infer<typeof ResponseReliabilityMetrics>;
+
+/** Phase 7: Controlled Failure Scenario Testing Result */
+export const ResilienceScenarioResult = z.object({
+  scenario_id: z.string(),
+  scenario_name: z.string(),
+  expected_behavior: z.string(),
+  actual_result: z.string(),
+  timestamp: z.string(),
+  status: z.enum(["PASS", "FAIL"]),
+  diagnostic_evidence: z.record(z.string(), z.unknown()),
+});
+export type ResilienceScenarioResult = z.infer<typeof ResilienceScenarioResult>;
+
 export const LiveIncident = Incident.passthrough().extend({
   analysis_id: z.string().optional(),
   analysis_registered: z.boolean().optional(),
@@ -324,6 +390,9 @@ export const LiveSession = z.object({
   recovery: LiveRecovery.optional(),
   attack_history: z.array(LiveAttackRecord).optional(),
   normal_history: z.array(LiveNormalRecord).optional(),
+  response_audit_trail: z.array(ResponseAuditRecord).optional(),
+  response_validation: ResponseValidationStatus.optional(),
+  response_reliability: ResponseReliabilityMetrics.optional(),
 });
 export type LiveSession = z.infer<typeof LiveSession>;
 

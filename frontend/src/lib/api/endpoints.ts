@@ -24,6 +24,9 @@ export const endpoints = {
 
   responseVerify: (analysisId: string, incidentId: string) =>
   `/api/analyses/${encodeURIComponent(analysisId)}/incidents/${encodeURIComponent(incidentId)}/response/verify`,
+
+  resilienceScenarios: () => "/api/resilience/scenarios",
+  resilienceScenariosRun: () => "/api/resilience/scenarios/run",
 } as const;
 
 export function joinUrl(baseUrl: string, path: string) {

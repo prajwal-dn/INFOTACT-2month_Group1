@@ -168,6 +168,28 @@ export function useVerifyRecovery() {
       client.verifyRecovery(input.analysisId, input.incidentId),
   });
 }
+
+export function useResilienceScenarios() {
+  const { client } = useApi();
+
+  return useQuery({
+    queryKey: ["resilience-scenarios"],
+    queryFn: () => client.getResilienceScenarios(),
+    staleTime: 30_000,
+  });
+}
+
+export function useRunResilienceScenarios() {
+  const { client } = useApi();
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => client.runResilienceScenarios(),
+    onSuccess: (data) => {
+      qc.setQueryData(["resilience-scenarios"], data);
+    },
+  });
+}
 export function metricsOf(a: { windows_scored: number; anomaly_count: number; normal_count: number } | undefined) {
   if (!a) return null;
   return {

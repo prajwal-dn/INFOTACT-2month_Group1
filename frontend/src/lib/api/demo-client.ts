@@ -383,7 +383,87 @@ export function createDemoClient(): ApiClient {
         "Recovery verification requires a backend API response and replay result.",
         501,
       );
+    },
 
+    async getResilienceScenarios() {
+      return [
+        {
+          scenario_id: "SCN-01",
+          scenario_name: "Attack simulator exits unexpectedly",
+          expected_behavior: "Reconcile process crash with non-zero exit code; mark state STOPPED (PROCESS_CRASH).",
+          actual_result: "Reconciled to state=STOPPED, return_code=139, reason=PROCESS_CRASH",
+          timestamp: new Date().toISOString(),
+          status: "PASS" as const,
+          diagnostic_evidence: { initial_pid: 7711, reconciled_state: "STOPPED", return_code: 139 },
+        },
+        {
+          scenario_id: "SCN-02",
+          scenario_name: "Attack simulator does not terminate within configured timeout",
+          expected_behavior: "Escalate signal termination from SIGINT/SIGTERM to SIGKILL upon timeout.",
+          actual_result: "Signal escalation executed; final return_code=-9",
+          timestamp: new Date().toISOString(),
+          status: "PASS" as const,
+          diagnostic_evidence: { target_pid: 8822, signals_sent: ["2", "15", "9"], final_return_code: -9 },
+        },
+        {
+          scenario_id: "SCN-03",
+          scenario_name: "Normal traffic generator crashes",
+          expected_behavior: "Reconcile normal crash with return_code=1; sniffer continues capturing uninterrupted.",
+          actual_result: "Normal state reconciled to STOPPED (rc=1, PROCESS_CRASH); sniffer active",
+          timestamp: new Date().toISOString(),
+          status: "PASS" as const,
+          diagnostic_evidence: { normal_pid: 3311, normal_return_code: 1, session_state: "capturing" },
+        },
+        {
+          scenario_id: "SCN-04",
+          scenario_name: "Sniffer process stops unexpectedly",
+          expected_behavior: "Detect sniffer exit; reconcile sniffer availability as inactive.",
+          actual_result: "Sniffer termination detected; sniffer_active=false, exit_code=2",
+          timestamp: new Date().toISOString(),
+          status: "PASS" as const,
+          diagnostic_evidence: { sniffer_pid: 1101, exit_code: 2, sniffer_active: false },
+        },
+        {
+          scenario_id: "SCN-05",
+          scenario_name: "Backend API becomes unavailable",
+          expected_behavior: "Catch connection failure, flag ERROR status in SystemHealthMonitor.",
+          actual_result: "Gracefully intercepted backend connection outage: ConnectionRefusedError",
+          timestamp: new Date().toISOString(),
+          status: "PASS" as const,
+          diagnostic_evidence: { handled_gracefully: true },
+        },
+        {
+          scenario_id: "SCN-06",
+          scenario_name: "Recovery verification does not complete",
+          expected_behavior: "Reset consecutive normal window counter to 0 upon intermediate anomaly.",
+          actual_result: "Anomaly during verification reset normal_windows to 0; state remained ATTACK_STOPPED_VERIFYING",
+          timestamp: new Date().toISOString(),
+          status: "PASS" as const,
+          diagnostic_evidence: { normal_windows: 0, final_recovery_state: "ATTACK_STOPPED_VERIFYING" },
+        },
+        {
+          scenario_id: "SCN-07",
+          scenario_name: "Multiple incidents occur in succession",
+          expected_behavior: "Correctly process and register successive incidents with distinct IDs.",
+          actual_result: "Generated 2 distinct incidents: ['INC-0001', 'INC-0002']",
+          timestamp: new Date().toISOString(),
+          status: "PASS" as const,
+          diagnostic_evidence: { incident_ids: ["INC-0001", "INC-0002"] },
+        },
+        {
+          scenario_id: "SCN-08",
+          scenario_name: "Session stops while an incident is being processed",
+          expected_behavior: "Gracefully drain queued incident jobs, complete incident registration, and shutdown.",
+          actual_result: "Shutdown completed=true; queue empty=true; incident registered=true",
+          timestamp: new Date().toISOString(),
+          status: "PASS" as const,
+          diagnostic_evidence: { shutdown_complete: true, incident_queue_empty: true },
+        },
+      ];
+    },
+
+    async runResilienceScenarios() {
+      return this.getResilienceScenarios();
     },
   };
 }

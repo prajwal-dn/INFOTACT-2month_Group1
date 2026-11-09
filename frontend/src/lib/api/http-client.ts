@@ -17,6 +17,7 @@ import {
   LiveAttackResult,
   LiveNormalResult,
   LiveSimulationsResult,
+  ResilienceScenarioResult,
   SystemStatus,
 } from "./schemas";
 
@@ -112,5 +113,9 @@ export function createHttpClient(baseUrl: string, fetchImpl: typeof fetch = fetc
     verifyRecovery: (analysisId, incidentId) =>
     json(RecoveryVerification, endpoints.responseVerify(analysisId, incidentId), post()),
 
-};
+    getResilienceScenarios: () =>
+      json(z.array(ResilienceScenarioResult), endpoints.resilienceScenarios()),
+    runResilienceScenarios: () =>
+      json(z.array(ResilienceScenarioResult), endpoints.resilienceScenariosRun(), post()),
+  };
 }

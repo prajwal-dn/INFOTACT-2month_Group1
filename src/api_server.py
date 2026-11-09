@@ -39,8 +39,7 @@ if __package__:
     from .live_session_manager import LiveSessionManager
     from .response_engine import ResponseEngine
     from .replay_mitigator import ReplayMitigator
-
-
+    from .resilience_tester import ResilienceTester
 else:
     from api_analysis_service import (
         ApiAnalysisService,
@@ -51,6 +50,7 @@ else:
     from live_session_manager import LiveSessionManager
     from response_engine import ResponseEngine
     from replay_mitigator import ReplayMitigator
+    from resilience_tester import ResilienceTester
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND_VERSION = "0.9.0-fastapi"
 
@@ -109,6 +109,7 @@ live_manager = LiveSessionManager(
 response_engine = ResponseEngine()
 replay_mitigator = ReplayMitigator()
 response_replays = {}
+resilience_tester = ResilienceTester(captures_dir=ROOT / "data")
 
 
 # Pydantic request models
@@ -705,6 +706,18 @@ def stop_live_capture(session_id: str):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error stopping live session: {exc}",
         )
+
+
+@app.get("/api/resilience/scenarios")
+def get_resilience_scenarios():
+    """Execute and return the 8 controlled failure scenario test results."""
+    return resilience_tester.run_all()
+
+
+@app.post("/api/resilience/scenarios/run")
+def run_resilience_scenarios():
+    """Trigger on-demand execution of the 8 controlled failure scenario test suite."""
+    return resilience_tester.run_all()
 
 
 def main():
