@@ -32,11 +32,11 @@ export interface TimelineEvent {
   title: string;
   description: string;
   /** Relevant CAN IDs from the backend, if available. */
-  can_ids?: string[];
+  can_ids?: string[] | undefined;
   /** Linked incident ID, if available. */
-  incident_id?: string;
+  incident_id?: string | undefined;
   /** Anomaly score from the model, if available. */
-  score?: number;
+  score?: number | undefined;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -150,19 +150,19 @@ function deriveEvents(session: LiveSession | undefined): TimelineEvent[] {
 
     // 3c. Response plan details if available
     const rr = inc.response_result as Record<string, unknown> | undefined;
-    if (rr?.plan) {
-      const plan = rr.plan as Record<string, unknown>;
+    if (rr && rr["plan"]) {
+      const plan = rr["plan"] as Record<string, unknown>;
       events.push({
         id: `response-plan:${inc.incident_id}`,
         timestamp: inc.end_time_utc,
         category: "response",
         severity: "warning",
         title: "Response plan generated",
-        description: `Action: ${(plan.action as string) ?? "unknown"} · ${(plan.description as string) ?? ""}`,
+        description: `Action: ${(plan["action"] as string) ?? "unknown"} · ${(plan["description"] as string) ?? ""}`,
         incident_id: inc.incident_id,
         can_ids:
-          Array.isArray(plan.target_can_ids) && (plan.target_can_ids as string[]).length
-            ? (plan.target_can_ids as string[])
+          Array.isArray(plan["target_can_ids"]) && (plan["target_can_ids"] as string[]).length
+            ? (plan["target_can_ids"] as string[])
             : undefined,
       });
     }
@@ -280,6 +280,7 @@ function deriveEvents(session: LiveSession | undefined): TimelineEvent[] {
       // Emit a single "continuity observed" event per 2 normal windows post-stop
       for (let i = 1; i < postStopNormalWindows.length; i += 2) {
         const w = postStopNormalWindows[i];
+        if (!w) continue;
         events.push({
           id: `continuity:${session.id}:${w.window_index}`,
           timestamp: w.window_start_utc,

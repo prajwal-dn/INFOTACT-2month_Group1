@@ -12,7 +12,9 @@ import { checksFor, SystemChecks } from "@/components/app/SystemChecks";
 import { ThreatChart } from "@/components/app/ThreatChart";
 import { SecurityAlertModal } from "@/components/app/SecurityAlertModal";
 import { SecurityEventTimeline } from "@/components/app/SecurityEventTimeline";
+import { AttackPreventionAnalytics } from "@/components/app/AttackPreventionAnalytics";
 import { useSecurityTimeline } from "@/lib/use-security-timeline";
+import { useAttackAnalytics } from "@/lib/use-attack-analytics";
 import { logEvent } from "@/lib/audit-log";
 import { liveAnomalyMessage, liveStartMessage, liveStopMessage } from "@/lib/audit-messages";
 import { useBackendConfig } from "@/lib/api";
@@ -104,8 +106,10 @@ function LiveMonitor() {
     const unacknowledged = incidents.filter((inc) => !acknowledgedIncidents.has(inc.incident_id));
     if (unacknowledged.length > 0 && !isAlertModalOpen) {
       const latest = unacknowledged[unacknowledged.length - 1];
-      setActiveIncident(latest);
-      setIsAlertModalOpen(true);
+      if (latest) {
+        setActiveIncident(latest);
+        setIsAlertModalOpen(true);
+      }
     }
   }, [s?.incidents, acknowledgedIncidents, activeIncident, isAlertModalOpen]);
 
@@ -199,6 +203,7 @@ function LiveMonitor() {
   };
 
   const timelineEvents = useSecurityTimeline(s);
+  const attackAnalytics = useAttackAnalytics(s);
 
   const windows = s?.windows ?? [];
   const anomalies = windows.filter((w) => w.prediction === "ANOMALY").length;
@@ -411,7 +416,7 @@ function LiveMonitor() {
                 <ShieldAlert className="size-5 shrink-0 text-destructive" />
                 <div>
                   <div className="font-semibold text-sm text-foreground">
-                    Confirmed Security Incident: {confirmedIncidents[confirmedIncidents.length - 1].incident_id}
+                    Confirmed Security Incident: {confirmedIncidents[confirmedIncidents.length - 1]?.incident_id ?? "—"}
                   </div>
                   <div className="text-xs text-muted-foreground">
                     {confirmedIncidents.length} incident{confirmedIncidents.length > 1 ? "s" : ""} confirmed by backend Isolation Forest
@@ -422,8 +427,11 @@ function LiveMonitor() {
                 size="sm"
                 variant="destructive"
                 onClick={() => {
-                  setActiveIncident(confirmedIncidents[confirmedIncidents.length - 1]);
-                  setIsAlertModalOpen(true);
+                  const last = confirmedIncidents[confirmedIncidents.length - 1];
+                  if (last) {
+                    setActiveIncident(last);
+                    setIsAlertModalOpen(true);
+                  }
                 }}
               >
                 View SOC Alert
@@ -478,6 +486,8 @@ function LiveMonitor() {
           <Panel title="Detection matrix" aside={<span className="text-xs text-muted-foreground">newest first · click a row for features</span>}>
             {windows.length ? <DetectionTable windows={windows} newestFirst maxHeight={420} /> : <EmptyState title="No windows scored yet" />}
           </Panel>
+
+          <AttackPreventionAnalytics analytics={attackAnalytics} capturing={capturing} />
 
           <SecurityEventTimeline events={timelineEvents} capturing={capturing} />
         </div>

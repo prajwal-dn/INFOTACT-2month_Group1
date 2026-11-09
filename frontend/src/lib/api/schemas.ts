@@ -253,6 +253,12 @@ export const LiveNormalResult = z.object({
 });
 export type LiveNormalResult = z.infer<typeof LiveNormalResult>;
 
+export const LiveSimulationsResult = z.object({
+  attack: z.record(z.string(), z.unknown()),
+  normal: z.record(z.string(), z.unknown()),
+});
+export type LiveSimulationsResult = z.infer<typeof LiveSimulationsResult>;
+
 export const LiveIncident = Incident.passthrough().extend({
   analysis_id: z.string().optional(),
   analysis_registered: z.boolean().optional(),

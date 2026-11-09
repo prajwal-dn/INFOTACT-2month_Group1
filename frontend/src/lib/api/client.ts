@@ -9,6 +9,7 @@ import type {
   LiveSession,
   LiveAttackResult,
   LiveNormalResult,
+  LiveSimulationsResult,
   SystemStatus,
 } from "./schemas";
 
@@ -34,7 +35,7 @@ export interface ApiClient {
   stopLiveAttack(id: string): Promise<{ state: string }>;
   startLiveNormal(id: string, intervalMs?: number): Promise<LiveNormalResult>;
   stopLiveNormal(id: string): Promise<{ state: string }>;
-  stopLiveSimulations(id: string): Promise<{ attack: unknown; normal: unknown }>;
+  stopLiveSimulations(id: string): Promise<LiveSimulationsResult>;
   planResponse(analysisId: string, incidentId: string): Promise<ResponsePlan>;
 
   activateResponse(analysisId: string, incidentId: string): Promise<ResponseActivation>;

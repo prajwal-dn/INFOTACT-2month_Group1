@@ -40,8 +40,8 @@ export function getAttackClassification(incident: LiveIncident): {
   threatLevel: string;
   description: string;
 } {
-  const planClassification = (incident.response_result as Record<string, any> | undefined)?.plan
-    ?.classification as string | undefined;
+  const responseObj = incident.response_result as Record<string, any> | undefined;
+  const planClassification = responseObj?.["plan"]?.classification as string | undefined;
 
   const reasonCodes = (incident.reasons ?? []).map((r) => r.code?.toUpperCase() ?? "");
   const hasFlood = reasonCodes.includes("HIGH_TRAFFIC_VOLUME") || reasonCodes.includes("DOMINANT_CAN_ID");
@@ -130,7 +130,7 @@ export function SecurityAlertModal({
 
   // Step 5: Recovery verified
   const step5Verified =
-    recoveryState === "RECOVERED" || responseResult?.verification?.recovery?.verified === true;
+    recoveryState === "RECOVERED" || responseResult?.["verification"]?.recovery?.verified === true;
 
   const affectedIds = incident.affected_can_ids ?? [];
   const responseEvidence = incident.response_evidence;
@@ -401,7 +401,7 @@ export function SecurityAlertModal({
                 </div>
               </div>
 
-              {incident.windows && incident.windows.length > 0 && (
+              {incident.windows && incident.windows.length > 0 && incident.windows[0] && (
                 <div className="rounded border bg-background/80 p-2.5">
                   <p className="mb-1 text-[0.7rem] uppercase text-muted-foreground">
                     First Anomalous Window #{incident.windows[0].window_index} Feature Vector:
