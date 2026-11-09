@@ -419,12 +419,12 @@ function LiveMonitor() {
               </dl>
               {s?.recovery?.state === "RECOVERED" && (
                 <p className="mt-3 text-xs text-success">
-                  Two consecutive normal model windows observed after the simulator stopped. Legitimate traffic was maintained throughout recovery.
+                  {s.recovery.required_normal_windows ?? 2} consecutive normal model windows observed after the simulator stopped. Legitimate traffic was maintained throughout recovery.
                 </p>
               )}
               {s?.recovery?.state === "ATTACK_STOPPED_VERIFYING" && (
                 <p className="mt-3 text-xs text-warning">
-                  Attack simulator stopped automatically. Waiting for two consecutive normal windows while legitimate traffic flows…
+                  Attack simulator stopped automatically. Waiting for {s.recovery.required_normal_windows ?? 2} consecutive normal windows while legitimate traffic flows…
                 </p>
               )}
             </Panel>

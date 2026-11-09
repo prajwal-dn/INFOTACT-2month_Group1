@@ -1,306 +1,500 @@
 # CAN-Sentinel
 ## Automotive ECU Intrusion Detection System
 
-CAN-Sentinel is a cybersecurity project for generating and monitoring
-simulated Controller Area Network (CAN) traffic. The current C modules
-run on Linux SocketCAN using the isolated virtual interface `vcan0`.
+CAN-Sentinel is a virtual automotive security laboratory that simulates
+Controller Area Network (CAN) bus traffic, detects anomalies with a
+machine-learning Isolation Forest model, and responds automatically to
+controlled attack simulations — all inside the isolated virtual interface
+`vcan0`.
 
-The project establishes a foundation for testing unusual CAN message
-frequency and unexpected CAN identifiers.
+> **Safety Note:** This is a research and demonstration project running
+> entirely on a virtual CAN interface. It does **not** protect real
+> vehicles. Never connect this software to a physical automotive bus or
+> vehicle network without explicit, authorised testing arrangements.
 
-## Current Implementation
+---
 
-- `src/normal_traffic.c`: generates simulated RPM, vehicle speed and
-  coolant-temperature messages.
-- `src/can_sniffer.c`: captures CAN frames and writes CSV records with
-  UTC timestamps, interface, CAN ID, frame format, flags, DLC and payload.
-- `src/attack_simulator.c`: generates two controlled anomaly scenarios.
-- `can_ids.md`: documents the project's simulated CAN message conventions.
-- `prajwal_day5_regression.md`: records regression test results and
-  measured timing limitations.
+## Features
 
-The Python machine-learning detector and graphical dashboard are
-future integration components; do not assume they are already connected
-to this C pipeline.
+| Phase | Feature |
+|---|---|
+| 1 | Isolation Forest anomaly detection trained on baseline CAN traffic |
+| 2 | Virtual CAN bus with normal and malicious traffic C generators |
+| 3 | Real-time live monitoring, windowed scoring, incident creation, and alert popup |
+| 4 | Attack Prevention Analytics dashboard with live metrics and charts |
+| 5 | Detailed incident reports with evidence, timeline, PDF print, and CSV export |
+| 6 | SOC overview, real-time traffic charts, threat panel, and system health monitor |
+| 7 | Automated response validation, resilience testing, and structured audit trail |
+| 8 | End-to-end integration, full documentation, and demo readiness |
+
+---
 
 ## Architecture
 
-Normal traffic generator or controlled anomaly simulator
-    -> Linux SocketCAN virtual interface (`vcan0`)
-    -> C CAN sniffer
-    -> timestamped CSV capture
-    -> planned Python analysis and detection
-    -> planned PyQt dashboard and alerts
+```
+Normal traffic generator (C)  ──┐
+Attack simulator (C)           ──┼──► vcan0 (Linux virtual CAN interface)
+                                 │          │
+                                 │    C CAN sniffer
+                                 │          │
+                                 │    timestamped CSV capture
+                                 │          │
+                                 │    Python FastAPI backend
+                                 │       ├─ Isolation Forest scorer
+                                 │       ├─ Incident engine
+                                 │       ├─ Live session manager
+                                 │       ├─ Automated response worker
+                                 │       └─ Resilience tester
+                                 │          │
+                                 └──────────┴──► TanStack Start React frontend
+                                                  ├─ SOC overview dashboard
+                                                  ├─ Real-time traffic charts
+                                                  ├─ Security alert modal
+                                                  ├─ Incident history & reports
+                                                  ├─ Attack prevention analytics
+                                                  └─ Response reliability dashboard
+```
+
+---
+
+## Technology Stack
+
+| Component | Technology |
+|---|---|
+| Traffic generators | C (Linux SocketCAN `AF_CAN`) |
+| CAN sniffer | C (Linux SocketCAN, CSV output) |
+| ML detection | Python, scikit-learn Isolation Forest |
+| Backend API | Python FastAPI, Uvicorn |
+| Frontend | TypeScript, React, TanStack Start, TanStack Query |
+| Charts | Recharts |
+| Styling | Tailwind CSS, shadcn/ui |
+| Testing (backend) | pytest |
+| Testing (frontend) | Vitest, React Testing Library |
+
+---
 
 ## Requirements
 
-- Linux with SocketCAN and virtual CAN (`vcan`) support
-- GCC compiler
-- `iproute2` utilities
-- `can-utils` for optional `candump` and `cansend` smoke tests
+### System (Kali Linux recommended)
+
+- Linux kernel with SocketCAN and virtual CAN (`vcan`) module support
+- GCC compiler (`gcc`)
+- `iproute2` utilities (`ip link`)
+- `can-utils` for optional smoke tests (`candump`, `cansend`)
+- Python 3.11+
+- Node.js 20+ and pnpm (or npm)
+
+### Python packages
+
+```
+pip install -r requirements.txt
+pip install -r requirements-api.txt
+pip install -r requirements-ml.txt
+```
+
+---
 
 ## 1. Set Up the Virtual CAN Interface
 
-Load the virtual CAN module:
+Load the virtual CAN kernel module:
 
-    sudo modprobe vcan
+```bash
+sudo modprobe vcan
+```
 
 Create `vcan0` if it does not already exist:
 
-    ip link show vcan0
+```bash
+sudo ip link add dev vcan0 type vcan
+sudo ip link set up vcan0
+```
 
-If the preceding command reports that `vcan0` does not exist, run:
+Verify the interface:
 
-    sudo ip link add dev vcan0 type vcan
+```bash
+ip -details link show vcan0
+# Should display the UP flag and type vcan
+```
 
-Bring the interface up:
-
-    sudo ip link set up vcan0
-
-Verify it:
-
-    ip -details link show vcan0
-
-The interface should display the `UP` flag.
+---
 
 ## 2. Compile the C Programs
 
-From the repository root, run:
+From the repository root:
 
-    mkdir -p build data
+```bash
+mkdir -p build data
 
-    gcc -std=gnu11 -Wall -Wextra -Wpedantic -O2 \
-      src/normal_traffic.c -o build/normal_traffic
+gcc -std=gnu11 -Wall -Wextra -Wpedantic -O2 \
+  src/normal_traffic.c -o build/normal_traffic
 
-    gcc -std=gnu11 -Wall -Wextra -Wpedantic -O2 \
-      src/can_sniffer.c -o build/can_sniffer
+gcc -std=gnu11 -Wall -Wextra -Wpedantic -O2 \
+  src/can_sniffer.c -o build/can_sniffer
 
-    gcc -std=gnu11 -Wall -Wextra -Wpedantic -O2 \
-      src/attack_simulator.c -o build/attack_simulator
+gcc -std=gnu11 -Wall -Wextra -Wpedantic -O2 \
+  src/attack_simulator.c -o build/attack_simulator
+```
 
-The `build/` directory contains local compiled binaries and is ignored
-by Git.
+The `build/` directory contains local compiled binaries and is excluded by `.gitignore`.
 
-## 3. Normal Traffic Generator
+---
 
-Run with the default interval:
+## 3. Set Up the Python Virtual Environment
 
-    ./build/normal_traffic
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt -r requirements-api.txt -r requirements-ml.txt
+```
 
-Stop with Ctrl+C.
+---
 
-Optionally specify the RPM and speed interval in milliseconds:
+## 4. Set Up the Frontend
 
-    ./build/normal_traffic 100
-    ./build/normal_traffic 500
+```bash
+cd frontend
+npm install          # or: pnpm install
+```
 
-The accepted interval is 1 through 60000 milliseconds. Coolant
-messages are scheduled every ten intervals.
+---
 
-Simulated message conventions:
+## 5. Start the Backend
+
+```bash
+source .venv/bin/activate
+python src/api_server.py
+```
+
+The FastAPI server starts on `http://localhost:8000` by default.
+
+Override host and port with environment variables:
+
+```bash
+CAN_SENTINEL_HOST=0.0.0.0 CAN_SENTINEL_PORT=8000 python src/api_server.py
+```
+
+---
+
+## 6. Start the Frontend (Development)
+
+```bash
+cd frontend
+npm run dev
+```
+
+Open `http://localhost:5173` in your browser.
+
+### Production Build
+
+```bash
+cd frontend
+npm run build
+```
+
+The compiled output is placed in `frontend/.output/`.
+
+---
+
+## 7. CAN Message Conventions
+
+Defined in `can_ids.md`.
 
 | CAN ID | Signal | Payload size | Default interval |
 |---|---|---:|---:|
-| `0x100` | RPM | 2 bytes | 100 ms |
+| `0x100` | RPM (normal) | 2 bytes | 100 ms |
 | `0x101` | Vehicle speed | 2 bytes | 100 ms |
-| `0x102` | Coolant temperature | 2 bytes | 1000 ms |
+| `0x102` | Coolant temperature | 2 bytes | 1 000 ms |
+| `0x100` | High-frequency attack (Mode 1) | 2 bytes `FFFF` | 1 ms |
+| `0x999` | Unexpected extended ID (Mode 2) | 2 bytes `DEAD` | 50 ms |
 
-Values are encoded as unsigned big-endian two-byte integers. The
-generator uses simulated ranges: RPM 2000-4000, speed 0-120 km/h,
-and coolant temperature 80-100 C.
+> **Attribution note:** Normal RPM and Mode 1 both use CAN ID `0x100`.
+> Per-frame attribution between normal and attack traffic is not possible
+> from sniffed data alone. The dashboard clearly labels such counts as
+> estimated where generator-side evidence is unavailable.
 
-## 4. Capture Normal Traffic
+---
 
-Start the sniffer and save its output:
+## 8. Live Demonstration Sequence
 
-    stdbuf -oL ./build/can_sniffer > data/normal_demo.csv &
-    SNIFFER_PID=$!
+This sequence demonstrates the full detection and response lifecycle.
 
-Give it a moment to start, then run the generator for five seconds:
+### Prerequisites
 
-    sleep 1
-    timeout 5s stdbuf -oL ./build/normal_traffic \
-      > data/normal_generator_demo.log 2>&1
-    sleep 1
+- `vcan0` is UP.
+- Backend is running (`python src/api_server.py`).
+- Frontend is running (`npm run dev` inside `frontend/`).
+- C binaries are compiled in `build/`.
 
-Stop the sniffer gracefully:
+### Step-by-step
 
-    kill -TERM "$SNIFFER_PID"
-    wait "$SNIFFER_PID"
+1. Open `http://localhost:5173` → **Live Monitor**.
+2. Click **Start Monitoring** to begin live capture on `vcan0`.
+3. Verify system health panel shows CAN interface UP, sniffer RUNNING.
+4. Click **Start Normal Traffic** to begin baseline CAN traffic.
+5. Observe the real-time traffic chart. CAN IDs `0x100`, `0x101`, `0x102` appear.
+6. Select **Mode 1** (high-frequency) or **Mode 2** (unexpected ID) attack.
+7. Click **Start Attack** to launch the controlled attack simulator.
+8. Watch anomaly scores rise in the detection window table.
+9. A **Security Alert** popup appears when the incident is confirmed.
+10. The backend **automatically terminates the attack process**.
+11. Observe **Normal Traffic Continues** — the sniffer and generator remain active.
+12. Recovery verification starts: 2 consecutive normal windows are required.
+13. When recovery completes, status changes to **RECOVERED**.
+14. Open the **Incident Investigation Report** for full evidence and timeline.
+15. Navigate to **Incident History** to view all recorded incidents.
+16. Use **Export CSV** to download the filtered incident list.
+17. Use **Print / Save as PDF** to produce a formatted incident report.
+18. Repeat steps 6–17 for Mode 2 to demonstrate both attack types.
+
+---
 
-The generator is designed to run until stopped, so a timeout after five
-seconds is expected. Check the capture:
+## 9. Mode 1: High-Frequency Attack (Manual CLI)
 
-    head data/normal_demo.csv
-    wc -l data/normal_demo.csv
+```bash
+# Terminal 1 — Sniffer
+stdbuf -oL ./build/can_sniffer > data/mode1_demo.csv &
+SNIFFER_PID=$!
 
-The first CSV line is the header; subsequent lines are captured frames.
+# Terminal 2 — Normal traffic
+./build/normal_traffic 100 &
+NORMAL_PID=$!
+
+# Terminal 3 — Mode 1 attack
+./build/attack_simulator 1 &
+ATTACK_PID=$!
+
+# After ~10 seconds, stop the attack
+kill -INT "$ATTACK_PID"
+wait "$ATTACK_PID"
+
+# After observing recovery, stop normal traffic and sniffer
+kill -INT "$NORMAL_PID"
+kill -TERM "$SNIFFER_PID"
+wait "$NORMAL_PID" "$SNIFFER_PID"
+```
+
+Mode 1 sends CAN ID `0x100`, payload `FFFF`, at approximately 1 ms intervals (much higher frequency than the 100 ms normal rate).
+
+---
+
+## 10. Mode 2: Unexpected Extended CAN ID (Manual CLI)
 
-## 5. Simulated Anomaly Scenarios
+```bash
+stdbuf -oL ./build/can_sniffer > data/mode2_demo.csv &
+SNIFFER_PID=$!
+
+./build/normal_traffic 100 &
+NORMAL_PID=$!
 
-All scenarios below run exclusively on the isolated virtual interface
-`vcan0`. Each example starts and stops the sniffer and simulator from
-the same terminal so that their process IDs remain available.
+./build/attack_simulator 2 &
+ATTACK_PID=$!
+
+sleep 10
+kill -INT "$ATTACK_PID"
+wait "$ATTACK_PID"
 
-### Mode 1: High-frequency messages
+kill -INT "$NORMAL_PID"
+kill -TERM "$SNIFFER_PID"
+wait "$NORMAL_PID" "$SNIFFER_PID"
+```
 
-Run a five-second capture:
+Mode 2 sends CAN ID `0x999`, payload `DEAD`, at approximately 50 ms intervals using an extended CAN frame (29-bit identifier, `0x999 > 0x7FF`).
 
-    rm -f data/high_frequency_demo.csv data/high_frequency_demo.log
+---
+
+## 11. Offline Capture Analysis
+
+Analyse a previously recorded CSV capture:
+
+```bash
+source .venv/bin/activate
+python src/score_capture.py data/normal_baseline_60s.csv
+```
 
-    stdbuf -oL ./build/can_sniffer \
-      > data/high_frequency_demo.csv &
-    SNIFFER_PID=$!
+The inference report is written to `reports/normal_baseline_60s_inference.csv`.
+
+The model uses 1 000 ms windows. The last incomplete window is excluded unless `--include-partial` is specified.
 
-    sleep 1
+---
+
+## 12. API Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/status` | System health and version |
+| GET | `/api/presets` | Available capture preset list |
+| GET | `/api/analyses` | All stored analysis results |
+| GET | `/api/incidents` | All incidents across all analyses |
+| POST | `/api/analyses` | Analyse a preset or path capture |
+| GET | `/api/analyses/{id}` | Single analysis result |
+| POST | `/api/analyses/upload` | Upload and analyse a CSV file |
+| GET | `/api/analyses/{id}/report.csv` | Download per-window inference CSV |
+| POST | `/api/live/start` | Start live capture session |
+| GET | `/api/live/{id}` | Poll live session state |
+| POST | `/api/live/{id}/stop` | Stop live capture and score |
+| POST | `/api/live/{id}/attack` | Start controlled attack simulator |
+| POST | `/api/live/{id}/attack/stop` | Stop attack simulator |
+| POST | `/api/live/{id}/normal` | Start normal traffic generator |
+| POST | `/api/live/{id}/normal/stop` | Stop normal traffic generator |
+| POST | `/api/live/{id}/simulations/stop` | Stop all simulation generators |
+| POST | `/api/analyses/{id}/incidents/{inc}/response/plan` | Plan response for a captured incident |
+| POST | `/api/analyses/{id}/incidents/{inc}/response/activate` | Activate planned response |
+| POST | `/api/analyses/{id}/incidents/{inc}/response/verify` | Verify post-mitigation recovery |
+| GET | `/api/resilience/scenarios` | Run and return 8 resilience scenario results |
+| POST | `/api/resilience/scenarios/run` | Re-run resilience scenarios on demand |
 
-    stdbuf -oL ./build/attack_simulator 1 \
-      > data/high_frequency_demo.log 2>&1 &
-    ATTACK_PID=$!
-
-    sleep 5
-    kill -INT "$ATTACK_PID"
-    wait "$ATTACK_PID"
-    sleep 1
-
-    kill -TERM "$SNIFFER_PID"
-    wait "$SNIFFER_PID"
-
-Mode 1 sends CAN ID `0x100`, payload `FFFF`, with a target interval
-of 1 ms.
-
-### Mode 2: Unexpected extended CAN ID
-
-Run a five-second capture:
-
-    rm -f data/unexpected_id_demo.csv data/unexpected_id_demo.log
-
-    stdbuf -oL ./build/can_sniffer \
-      > data/unexpected_id_demo.csv &
-    SNIFFER_PID=$!
-
-    sleep 1
-
-    stdbuf -oL ./build/attack_simulator 2 \
-      > data/unexpected_id_demo.log 2>&1 &
-    ATTACK_PID=$!
-
-    sleep 5
-    kill -INT "$ATTACK_PID"
-    wait "$ATTACK_PID"
-    sleep 1
-
-    kill -TERM "$SNIFFER_PID"
-    wait "$SNIFFER_PID"
-
-Mode 2 sends CAN ID `0x999`, payload `DEAD`, with a target interval
-of 50 ms. It uses an extended CAN frame because `0x999` is larger
-than the maximum 11-bit standard identifier `0x7FF`.
-
-After each test, inspect the capture with:
-
-    head data/high_frequency_demo.csv
-    head data/unexpected_id_demo.csv
-    wc -l data/high_frequency_demo.csv data/unexpected_id_demo.csv
-
-## 6. CSV Format
-
-The sniffer emits these columns:
-
-    timestamp_utc,interface,can_id,frame_format,flags,dlc,payload
-
-- `timestamp_utc`: UTC wall-clock timestamp generated when the frame
-  is processed in user space.
-- `interface`: the virtual interface (`vcan0`).
-- `can_id`: decoded CAN identifier.
-- `frame_format`: standard, extended or error.
-- `flags`: frame flags recorded by the sniffer.
-- `dlc`: payload length.
-- `payload`: payload bytes formatted as uppercase hexadecimal.
-
-## 7. Recorded Regression Results
-
-Results from the recorded run on 24 October 2026:
-
-| Scenario | Frames captured | Validation |
-|---|---:|---|
-| Normal traffic | See `data/normal_regression.csv` | Basic CSV checks passed |
-| High-frequency | 2167 | Passed |
-| Unexpected extended ID | 87 | Passed |
-
-High-frequency run: all captured frames used ID `0x100` and payload
-`FFFF`. Average observed interval was 2.307 ms; median was 2.074 ms.
-
-Unexpected extended-ID run: all captured frames used extended ID
-`0x999` and payload `DEAD`. Average observed interval was 58.323 ms;
-median was 52.344 ms.
-
-See `prajwal_day5_regression.md` and the corresponding files in `data/`
-for details.
-
-## 8. Saved-Model Inference and Live Dashboard
-
-### Run inference on a saved capture
-
-Activate the virtual environment and analyze a recorded virtual-CAN capture.
-Run these commands from the repository root:
-
-    source .venv/bin/activate
-    python src/score_capture.py data/normal_baseline_60s.csv
-
-The default report is written to
-`reports/normal_baseline_60s_inference.csv`. It contains per-window
-predictions, anomaly scores and feature values.
-
-Inference loads `models/isolation_forest_baseline.joblib` without
-retraining. The model uses 1,000 ms windows and may exclude a potentially
-incomplete final window. Only virtual-CAN captures from `vcan0` are accepted.
-
-### Launch the desktop dashboard
-
-    source .venv/bin/activate
-    python src/dashboard.py
-
-The dashboard supports capture presets, browsing for a CSV, analyzing
-saved captures and starting a capture on virtual `vcan0`.
-
-While capture is running, completed one-second windows are incrementally
-scored with the saved model. Results and summary metrics are updated, and
-an alert is displayed when a window is classified as anomalous. The newest
-potentially incomplete window remains pending. Use **Stop & Analyze** to
-finish capture and perform final inference.
-
-### Run the regression checks
-
-Run the following from the repository root:
-
-    python tests/validate_captures.py
-    python tests/test_score_capture.py
-    QT_QPA_PLATFORM=offscreen python tests/test_dashboard_smoke.py
-    python -m compileall -q src tests
-
-Passing these tests does not establish independently validated real-world
-detection accuracy.
-
-## 9. Limitations
-
-The target sending intervals are not exact timing guarantees. Virtual
-machine scheduling and user-space capture timing can cause delays and
-outliers. The timestamps are not hardware-level bus timestamps.
-
-Successful frame capture and CSV validation do not, by themselves,
-prove that a machine-learning detector accurately classifies attacks.
-Detection metrics and dashboard integration must be measured separately.
-
-## 10. Safety
-
-This project uses simulated traffic on the isolated virtual `vcan0`
-interface. Never run attack simulations against a physical vehicle,
-live automotive bus or network without explicit authorization.
-
-## 11. Contributor Workflow
-
-Prajwal's working branch is `prajwal`. Commit meaningful source code,
-tests, documentation and evidence to the assigned branch. Do not merge
-to `main` before the project review instruction allows it.
-
+Full request and response schemas are documented in `docs/api_contract.md`.
+
+---
+
+## 13. Testing
+
+### Backend unit tests
+
+```bash
+# From repository root, with the virtual environment active
+export PYTHONPATH=src
+python -m pytest tests/test_api_analysis_service.py \
+                 tests/test_concurrent_traffic.py \
+                 tests/test_live_incident_worker.py \
+                 tests/test_incident_engine.py \
+                 tests/test_resilience_scenarios.py \
+                 tests/test_response_engine.py \
+                 tests/test_score_capture.py \
+                 tests/test_replay_mitigator.py \
+                 -v
+```
+
+Expected: **90 passed**.
+
+### Frontend tests
+
+```bash
+cd frontend
+npm test -- --run
+```
+
+Expected: **74 passed** across 10 test files.
+
+### TypeScript check
+
+```bash
+cd frontend
+npx tsc --noEmit
+```
+
+### Production build check
+
+```bash
+cd frontend
+npm run build
+```
+
+### Resilience scenario tests
+
+Executed automatically as part of the backend test suite
+(`tests/test_resilience_scenarios.py`). The 8 scenarios cover:
+
+1. Unexpected attack process exit.
+2. Attack simulator timeout with signal escalation.
+3. Normal traffic generator crash.
+4. Sniffer process crash.
+5. Backend API unavailable.
+6. Recovery interrupted by a new anomaly.
+7. Multiple incidents in rapid succession.
+8. Session stop while mitigation is in progress.
+
+---
+
+## 14. CSV Capture Format
+
+The sniffer writes these columns:
+
+```
+timestamp_utc,interface,can_id,frame_format,flags,dlc,payload
+```
+
+| Column | Description |
+|---|---|
+| `timestamp_utc` | UTC wall-clock timestamp (user-space) |
+| `interface` | Virtual interface (`vcan0`) |
+| `can_id` | Decoded CAN identifier (decimal) |
+| `frame_format` | `standard`, `extended`, or `error` |
+| `flags` | Frame flags recorded by the sniffer |
+| `dlc` | Payload byte length |
+| `payload` | Payload bytes in uppercase hexadecimal |
+
+---
+
+## 15. Isolation Forest Model
+
+The model is stored in `models/isolation_forest_baseline.joblib`.
+
+- Trained on normal CAN traffic baseline captured on `vcan0`.
+- Uses 1 000 ms sliding windows of per-window features (frame count, unique IDs, payload entropy, etc.).
+- Contamination parameter set to reflect expected anomaly rate in baseline.
+- **Do not retrain or modify the model** during evaluation. The saved model is the reference artefact.
+
+---
+
+## 16. Known Limitations
+
+| Area | Limitation |
+|---|---|
+| Frame attribution | CAN ID `0x100` is shared by normal RPM and Mode 1. Exact frame counts cannot be attributed per-generator from sniffed data alone. Counts labelled **estimated** in the UI. |
+| Timestamps | CAN frame timestamps are user-space UTC, not hardware bus timestamps. Scheduling jitter may cause ±few-ms drift. |
+| Timing intervals | Target sending intervals (1 ms Mode 1, 50 ms Mode 2) are not hard real-time guarantees. Observed intervals may vary with system load. |
+| False positives | No ground-truth labelling mechanism exists in the current build. False-positive counts are not claimed. |
+| vcan0 only | All simulation and attack testing is restricted to the isolated virtual interface `vcan0`. Physical CAN hardware is not supported. |
+| Windows | C generators require Linux SocketCAN. The Python backend and frontend build on Windows but live capture requires a Linux environment. |
+| Session history | Session attack history and analytics are retained for the active session only. History is not persisted across backend restarts. |
+| Recovery threshold | Recovery requires 2 consecutive normal-scoring windows after the attack process exits. This threshold is configurable via `required_normal_windows` in the session state. |
+
+---
+
+## 17. Project Layout
+
+```
+.
+├── src/
+│   ├── api_server.py           # FastAPI backend
+│   ├── live_session_manager.py # Live capture, scoring, incident dispatch
+│   ├── incident_engine.py      # Incident grouping and severity
+│   ├── api_analysis_service.py # Offline capture analysis service
+│   ├── isolation_forest_detector.py  # ML scorer
+│   ├── response_engine.py      # Offline response planning
+│   ├── resilience_tester.py    # Controlled failure scenario harness
+│   ├── replay_mitigator.py     # Offline replay mitigation
+│   ├── score_capture.py        # CLI inference tool
+│   ├── normal_traffic.c        # Normal CAN traffic generator
+│   ├── can_sniffer.c           # CAN frame sniffer and CSV writer
+│   └── attack_simulator.c      # Controlled attack simulator (Mode 1 & 2)
+├── frontend/
+│   └── src/
+│       ├── routes/live.tsx           # Live monitor page
+│       ├── components/app/           # All dashboard components
+│       └── lib/api/                  # API client, schemas, queries
+├── tests/                     # pytest backend test suite
+├── models/
+│   └── isolation_forest_baseline.joblib
+├── data/                      # Captured CSV files (git-ignored)
+├── reports/                   # Inference report CSVs
+├── docs/
+│   ├── api_contract.md
+│   └── final_architecture.md
+├── can_ids.md                  # CAN message convention reference
+├── requirements.txt
+├── requirements-api.txt
+├── requirements-ml.txt
+└── README.md
+```
+
+---
+
+## 18. Contributor Workflow
+
+Working branch: `prajwal`.
+
+Commit source code, tests, documentation, and evidence to the assigned branch.
+Do not merge to `main` before the project review instruction allows it.
+Do not push to remote without explicit instruction.

@@ -152,7 +152,7 @@ export function ResponseReliabilityDashboard({
     {
       id: "recovery_verification",
       name: "Consecutive Normal-Window Recovery Verification",
-      desc: "Validates two consecutive normal model windows after adversary termination.",
+      desc: `Validates ${session?.recovery?.required_normal_windows ?? 2} consecutive normal model windows after adversary termination.`,
       check: validation?.checks.recovery_verification ?? {
         status:
           session?.recovery?.state === "RECOVERED"
@@ -162,9 +162,9 @@ export function ResponseReliabilityDashboard({
               : "NOT VERIFIED",
         detail:
           session?.recovery?.state === "RECOVERED"
-            ? "Recovery verified (2/2 normal windows)"
+            ? `Recovery verified (${session.recovery.normal_windows ?? session.recovery.required_normal_windows ?? 2}/${session.recovery.required_normal_windows ?? 2} normal windows)`
             : session?.recovery?.state === "ATTACK_STOPPED_VERIFYING"
-              ? `Verifying (${session.recovery.normal_windows ?? 0}/2 windows)`
+              ? `Verifying (${session.recovery.normal_windows ?? 0}/${session.recovery.required_normal_windows ?? 2} windows)`
               : "Recovery not started",
       },
     },

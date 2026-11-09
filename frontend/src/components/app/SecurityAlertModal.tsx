@@ -372,7 +372,7 @@ export function SecurityAlertModal({
               }
               description={
                 step5Verified
-                  ? "Telemetry verified: Bus traffic returned to nominal baseline with 2 consecutive normal windows."
+                  ? `Telemetry verified: Bus traffic returned to nominal baseline with ${requiredNormalWindows} consecutive normal windows.`
                   : `Waiting for ${requiredNormalWindows - normalWindows} more normal window(s) to confirm complete bus recovery.`
               }
             />

@@ -637,10 +637,11 @@ class LiveSessionManager:
 
             # 7. Consecutive normal-window recovery verification
             rec_state = recovery.get("state", "NOT_STARTED")
+            req_win = recovery.get("required_normal_windows", 2)
             if rec_state == "RECOVERED":
-                chk_recovery = {"status": "PASS", "detail": f"Recovery verified ({recovery.get('normal_windows', 2)}/2 consecutive normal windows)"}
+                chk_recovery = {"status": "PASS", "detail": f"Recovery verified ({recovery.get('normal_windows', req_win)}/{req_win} consecutive normal windows)"}
             elif rec_state == "ATTACK_STOPPED_VERIFYING":
-                chk_recovery = {"status": "RUNNING", "detail": f"Verifying ({recovery.get('normal_windows', 0)}/2 consecutive normal windows)"}
+                chk_recovery = {"status": "RUNNING", "detail": f"Verifying ({recovery.get('normal_windows', 0)}/{req_win} consecutive normal windows)"}
             else:
                 chk_recovery = {"status": "NOT VERIFIED", "detail": f"Recovery state: {rec_state}"}
 
