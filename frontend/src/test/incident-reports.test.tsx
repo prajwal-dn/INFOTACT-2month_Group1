@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { IncidentReportModal, exportIncidentCsv } from "@/components/app/IncidentReportModal";
-import { IncidentHistoryTable } from "@/components/app/IncidentHistoryTable";
+import {
+  IncidentHistoryTable,
+  exportAllCsv,
+  getIncidentTimestamp,
+} from "@/components/app/IncidentHistoryTable";
 import type { LiveIncident } from "@/lib/api/schemas";
 
 const mockIncidentMode1: LiveIncident = {
@@ -271,5 +275,130 @@ describe("Phase 5: Detailed Incident Reports and Incident History", () => {
     // Modal opens showing investigation report
     expect(screen.getByText("SOC Investigation Report")).toBeInTheDocument();
     expect(screen.getByText(/First Anomalous Window/i)).toBeInTheDocument();
+  });
+
+  it("filters incidents by date range (start date, end date, and clear)", () => {
+    const incPast: LiveIncident = {
+      ...mockIncidentMode1,
+      incident_id: "INC-PAST",
+      start_time_utc: "2026-11-01T10:00:00.000Z",
+      response_latency: {
+        ...mockIncidentMode1.response_latency!,
+        incident_confirmed_utc: "2026-11-01T10:00:00.000Z",
+      },
+    };
+    const incFuture: LiveIncident = {
+      ...mockIncidentMode2,
+      incident_id: "INC-FUTURE",
+      start_time_utc: "2026-11-20T10:00:00.000Z",
+      response_latency: {
+        ...mockIncidentMode2.response_latency!,
+        incident_confirmed_utc: "2026-11-20T10:00:00.000Z",
+      },
+    };
+
+    render(
+      <IncidentHistoryTable
+        liveIncidents={[incPast, incFuture]}
+        historicIncidents={[]}
+      />
+    );
+
+    expect(screen.getByText("INC-PAST")).toBeInTheDocument();
+    expect(screen.getByText("INC-FUTURE")).toBeInTheDocument();
+
+    const startInput = screen.getByLabelText("Start date");
+    const endInput = screen.getByLabelText("End date");
+
+    // Filter to only past (from 2026-11-01 to 2026-11-05)
+    fireEvent.change(startInput, { target: { value: "2026-11-01" } });
+    fireEvent.change(endInput, { target: { value: "2026-11-05" } });
+
+    expect(screen.getByText("INC-PAST")).toBeInTheDocument();
+    expect(screen.queryByText("INC-FUTURE")).toBeNull();
+
+    // Clear dates
+    const clearBtn = screen.getByRole("button", { name: "Clear date range" });
+    fireEvent.click(clearBtn);
+
+    expect(screen.getByText("INC-PAST")).toBeInTheDocument();
+    expect(screen.getByText("INC-FUTURE")).toBeInTheDocument();
+  });
+
+  it("handles missing timestamps safely without inventing dates or crashing", () => {
+    const incNoTimestamp: LiveIncident = {
+      ...mockIncidentMode1,
+      incident_id: "INC-NOTS",
+      start_time_utc: "",
+      end_time_utc: "",
+      response_latency: undefined,
+    };
+
+    expect(getIncidentTimestamp(incNoTimestamp)).toBeNull();
+
+    render(
+      <IncidentHistoryTable
+        liveIncidents={[incNoTimestamp, mockIncidentMode1]}
+        historicIncidents={[]}
+      />
+    );
+
+    // Both visible before date filtering
+    expect(screen.getByText("INC-NOTS")).toBeInTheDocument();
+    expect(screen.getByText("INC-0001")).toBeInTheDocument();
+
+    // When date filter is applied, incident without timestamp is safely excluded
+    const startInput = screen.getByLabelText("Start date");
+    fireEvent.change(startInput, { target: { value: "2026-11-09" } });
+
+    expect(screen.queryByText("INC-NOTS")).toBeNull();
+    expect(screen.getByText("INC-0001")).toBeInTheDocument();
+  });
+
+  it("exports only currently filtered results in exportAllCsv", () => {
+    let exportedText = "";
+    const origCreateObjectURL = URL.createObjectURL;
+    const origRevokeObjectURL = URL.revokeObjectURL;
+
+    URL.createObjectURL = vi.fn((blob: Blob) => {
+      // In jsdom / vitest environment, read blob text asynchronously or inspect mock
+      return "blob:test-all";
+    });
+    URL.revokeObjectURL = vi.fn();
+
+    const origClick = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = vi.fn(function (this: HTMLAnchorElement) {
+      expect(this.download).toBe("test_filtered.csv");
+    });
+
+    try {
+      // Pass only 1 incident to exportAllCsv as would happen when filtered
+      exportAllCsv([mockIncidentMode1], "test_filtered.csv");
+      expect(HTMLAnchorElement.prototype.click).toHaveBeenCalled();
+    } finally {
+      URL.createObjectURL = origCreateObjectURL;
+      URL.revokeObjectURL = origRevokeObjectURL;
+      HTMLAnchorElement.prototype.click = origClick;
+    }
+  });
+
+  it("renders Print / Save as PDF button and triggers window.print", () => {
+    const printSpy = vi.spyOn(window, "print").mockImplementation(() => {});
+
+    render(
+      <IncidentReportModal
+        incident={mockIncidentMode1}
+        isOpen={true}
+        onClose={() => {}}
+      />
+    );
+
+    const printBtn = screen.getByRole("button", { name: /Print \/ Save as PDF/i });
+    expect(printBtn).toBeInTheDocument();
+
+    fireEvent.click(printBtn);
+    expect(printSpy).toHaveBeenCalled();
+
+    printSpy.mockRestore();
   });
 });

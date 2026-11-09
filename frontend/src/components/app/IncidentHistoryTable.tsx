@@ -10,6 +10,7 @@ import { useState, useMemo } from "react";
 import {
   AlertCircle,
   AlertTriangle,
+  Calendar,
   ChevronRight,
   Clock,
   Download,
@@ -72,14 +73,25 @@ function inferMode(inc: LiveIncident): number | null {
   return null;
 }
 
+export function getIncidentTimestamp(inc: LiveIncident): string | null {
+  return (
+    inc.response_latency?.incident_confirmed_utc ||
+    inc.start_time_utc ||
+    (inc as { created_at?: string }).created_at ||
+    inc.response_latency?.first_anomalous_window_utc ||
+    null
+  );
+}
+
 /** Build a flattened CSV of all incidents in the filtered list. */
-function exportAllCsv(incidents: LiveIncident[], filename: string): void {
+export function exportAllCsv(incidents: LiveIncident[], filename: string): void {
   const header = [
     "Incident ID",
     "Analysis ID",
     "Severity",
     "Status",
     "Attack Mode",
+    "Confirmed Date UTC",
     "Start Time UTC",
     "End Time UTC",
     "Window Count",
@@ -97,9 +109,10 @@ function exportAllCsv(incidents: LiveIncident[], filename: string): void {
         inc.severity,
         statusLabel(inc),
         String(latency?.attack_mode ?? ""),
-        inc.start_time_utc,
-        inc.end_time_utc,
-        String(inc.window_count),
+        getIncidentTimestamp(inc) ?? "",
+        inc.start_time_utc ?? "",
+        inc.end_time_utc ?? "",
+        String(inc.window_count ?? ""),
         (inc.affected_can_ids ?? []).join(" | "),
         String(latency?.detection_to_termination_ms ?? ""),
         inc.response_state ?? inc.status ?? "",
@@ -128,6 +141,8 @@ export function IncidentHistoryTable({
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("ALL");
   const [modeFilter, setModeFilter] = useState<ModeFilter>("ALL");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
+  const [startDate, setStartDate] = useState<string>("");
+  const [endDate, setEndDate] = useState<string>("");
   const [reportIncident, setReportIncident] = useState<LiveIncident | null>(null);
 
   // Merge: live incidents shown first (newest session at top), historic below
@@ -149,9 +164,16 @@ export function IncidentHistoryTable({
         const sl = statusLabel(inc);
         if (!sl.toUpperCase().includes(statusFilter)) return false;
       }
+      if (startDate || endDate) {
+        const ts = getIncidentTimestamp(inc);
+        if (!ts) return false; // Safely exclude missing timestamps without inventing dates
+        const incDate = ts.slice(0, 10);
+        if (startDate && incDate < startDate) return false;
+        if (endDate && incDate > endDate) return false;
+      }
       return true;
     });
-  }, [all, severityFilter, modeFilter, statusFilter]);
+  }, [all, severityFilter, modeFilter, statusFilter, startDate, endDate]);
 
   if (all.length === 0) {
     return (
@@ -247,6 +269,42 @@ export function IncidentHistoryTable({
               {label}
             </button>
           ))}
+        </div>
+
+        <span className="text-muted-foreground/40 text-xs">|</span>
+
+        {/* Date Range Filter */}
+        <div className="flex items-center gap-1.5 text-xs">
+          <Calendar className="size-3.5 text-muted-foreground shrink-0" />
+          <span className="text-[0.68rem] text-muted-foreground">From:</span>
+          <input
+            type="date"
+            aria-label="Start date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            className="rounded border border-border bg-secondary/60 px-1.5 py-0.5 font-mono text-[0.68rem] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+          <span className="text-[0.68rem] text-muted-foreground">To:</span>
+          <input
+            type="date"
+            aria-label="End date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            className="rounded border border-border bg-secondary/60 px-1.5 py-0.5 font-mono text-[0.68rem] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+          {(startDate || endDate) && (
+            <button
+              type="button"
+              aria-label="Clear date range"
+              onClick={() => {
+                setStartDate("");
+                setEndDate("");
+              }}
+              className="rounded border border-border bg-secondary/80 px-1.5 py-0.5 text-[0.65rem] text-muted-foreground hover:text-foreground"
+            >
+              Clear
+            </button>
+          )}
         </div>
 
         <div className="ml-auto">

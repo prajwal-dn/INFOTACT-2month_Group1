@@ -241,3 +241,67 @@
     stroke-dashoffset: -400;
   }
 }
+
+/*
+ * Phase 5 — Print & Save as PDF Stylesheet
+ * Cleans the view for SOC printable incident dossiers:
+ * Hides all dashboard navigation, sidebar, triggers, background waveforms, and action buttons.
+ * Renders the incident report cleanly with high-contrast text and full evidence tables.
+ */
+@media print {
+  /* Hide dashboard navigation, header, sidebar, and non-printable controls */
+  header,
+  nav,
+  aside,
+  button,
+  .print\:hidden {
+    display: none !important;
+  }
+
+  body,
+  html {
+    background: #ffffff !important;
+    color: #0f172a !important;
+  }
+
+  /* Unconstrain Radix dialog container for continuous printable page flow */
+  [role="dialog"] {
+    position: static !important;
+    transform: none !important;
+    max-height: none !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    border: none !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  /* Hide modal backdrop overlay */
+  [data-aria-hidden="true"],
+  .fixed.inset-0 {
+    display: none !important;
+  }
+
+  /* Force high contrast text and clean borders for all report sections */
+  [role="dialog"] * {
+    color: #0f172a !important;
+    border-color: #cbd5e1 !important;
+    background-color: transparent !important;
+  }
+
+  [role="dialog"] section {
+    background-color: #f8fafc !important;
+    border: 1px solid #cbd5e1 !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+    margin-bottom: 1rem !important;
+  }
+
+  [role="dialog"] .font-mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
+  }
+}
+

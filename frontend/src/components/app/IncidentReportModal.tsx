@@ -483,43 +483,45 @@ export function IncidentReportModal({ incident, isOpen, onClose }: IncidentRepor
             )}
           </ReportSection>
 
-          {/* Section 6 — Raw window features (collapsible) */}
+          {/* Section 6 — Raw window features (collapsible on screen, visible in print) */}
           {(incident.windows ?? []).length > 0 && (
             <ReportSection title="Anomalous Window Feature Vectors" icon={<FileText className="size-4" />}>
               <button
                 type="button"
-                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground print:hidden"
                 onClick={() => setShowRawWindows((v) => !v)}
               >
                 {showRawWindows ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
                 {showRawWindows ? "Hide" : "Show"} window feature vectors ({incident.windows.length} windows)
               </button>
-              {showRawWindows && (
-                <div className="mt-2 max-h-60 space-y-2 overflow-y-auto">
-                  {incident.windows.map((w) => (
-                    <div key={w.window_index} className="rounded border bg-secondary/30 px-3 py-2 text-[0.68rem]">
-                      <div className="mb-1 flex items-center justify-between">
-                        <span className="font-mono font-semibold">Window #{w.window_index}</span>
-                        <span
-                          className={cn(
-                            "rounded px-1.5 py-0.5 text-[0.65rem] font-semibold",
-                            w.prediction === "ANOMALY"
-                              ? "bg-destructive/15 text-destructive"
-                              : "bg-emerald-500/15 text-emerald-500"
-                          )}
-                        >
-                          {w.prediction}
-                        </span>
-                      </div>
-                      <div className="text-muted-foreground">
-                        Score: <span className="font-mono">{w.anomaly_score.toFixed(6)}</span>
-                        {" · "}
-                        UTC: <span className="font-mono">{fmtTs(w.window_start_utc)}</span>
-                      </div>
+              <div className={cn("mt-2 max-h-60 space-y-2 overflow-y-auto print:max-h-none print:overflow-visible", !showRawWindows && "hidden print:block")}>
+                {incident.windows.map((w) => (
+                  <div key={w.window_index} className="rounded border bg-secondary/30 px-3 py-2 text-[0.68rem] print:bg-white print:border-gray-300">
+                    <div className="mb-1 flex items-center justify-between">
+                      <span className="font-mono font-semibold">Window #{w.window_index}</span>
+                      <span
+                        className={cn(
+                          "rounded px-1.5 py-0.5 text-[0.65rem] font-semibold",
+                          w.prediction === "ANOMALY"
+                            ? "bg-destructive/15 text-destructive print:text-red-700"
+                            : "bg-emerald-500/15 text-emerald-500"
+                        )}
+                      >
+                        {w.prediction}
+                      </span>
                     </div>
-                  ))}
-                </div>
-              )}
+                    <div className="text-muted-foreground">
+                      Anomaly Score: <span className="font-mono font-semibold">{w.anomaly_score.toFixed(6)}</span>
+                      {" · "}
+                      Start UTC: <span className="font-mono">{fmtTs(w.window_start_utc)}</span>
+                      {" · "}
+                      Frames: <span className="font-mono">{w.features.total_frames}</span>
+                      {" · "}
+                      Dominant ID: <span className="font-mono">{incident.response_evidence?.dominant_can_id ?? "—"}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </ReportSection>
           )}
 
@@ -545,7 +547,7 @@ export function IncidentReportModal({ incident, isOpen, onClose }: IncidentRepor
               className="gap-1.5"
             >
               <Printer className="size-4" />
-              Export PDF
+              Print / Save as PDF
             </Button>
             <Button
               variant="default"
