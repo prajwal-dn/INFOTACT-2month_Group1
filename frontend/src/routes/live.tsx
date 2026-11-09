@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Loader2, Radio, ShieldAlert, Square, Zap } from "lucide-react";
+import { AlertCircle, AlertTriangle, Loader2, Radio, ShieldAlert, Square, Zap } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -10,12 +10,16 @@ import { MetricGrid } from "@/components/app/MetricGrid";
 import { EmptyState, ErrorState, PageHeader, Panel } from "@/components/app/primitives";
 import { checksFor, SystemChecks } from "@/components/app/SystemChecks";
 import { ThreatChart } from "@/components/app/ThreatChart";
+import { SecurityAlertModal } from "@/components/app/SecurityAlertModal";
+import { SecurityEventTimeline } from "@/components/app/SecurityEventTimeline";
+import { useSecurityTimeline } from "@/lib/use-security-timeline";
 import { logEvent } from "@/lib/audit-log";
 import { liveAnomalyMessage, liveStartMessage, liveStopMessage } from "@/lib/audit-messages";
 import { useBackendConfig } from "@/lib/api";
 import { BusActivityWave } from "@/components/app/BusActivityWave";
 import { setActiveLiveSession } from "@/lib/live-session-store";
 import { useLiveSession, useStartLive, useStartLiveAttack, useStatus, useStopLive } from "@/lib/api/queries";
+import type { LiveIncident } from "@/lib/api/schemas";
 import { pageHead } from "@/lib/head";
 import { cn } from "@/lib/utils";
 
@@ -43,9 +47,16 @@ function LiveMonitor() {
   const s = session.data;
   const capturing = s?.state === "capturing";
   const seen = useRef(new Set<number>());
+
+  // Incident alert state: tracks acknowledged incidents to prevent duplicate popups
+  const [acknowledgedIncidents, setAcknowledgedIncidents] = useState<Set<string>>(() => new Set());
+  const [activeIncident, setActiveIncident] = useState<LiveIncident | null>(null);
+  const [isAlertModalOpen, setIsAlertModalOpen] = useState(false);
+
   useEffect(() => setActiveLiveSession(capturing && sessionId ? sessionId : null), [capturing, sessionId]);
   const ready = checksFor(status.data).every((c) => c.ok || c.demo);
 
+  // Monitor windows for anomaly toasts
   useEffect(() => {
     if (!s) return;
     for (const w of s.windows) {
@@ -62,10 +73,50 @@ function LiveMonitor() {
     }
   }, [s]);
 
+  // Trigger modal when backend confirms a new security incident
+  useEffect(() => {
+    if (!s || !s.incidents || s.incidents.length === 0) return;
+    const incidents = s.incidents;
+
+    // Keep active incident updated with latest live status (e.g. recovery progress)
+    if (activeIncident) {
+      const updated = incidents.find((inc) => inc.incident_id === activeIncident.incident_id);
+      if (updated && updated !== activeIncident) {
+        setActiveIncident(updated);
+      }
+    }
+
+    // Trigger popup for newly confirmed unacknowledged incidents
+    const unacknowledged = incidents.filter((inc) => !acknowledgedIncidents.has(inc.incident_id));
+    if (unacknowledged.length > 0 && !isAlertModalOpen) {
+      const latest = unacknowledged[unacknowledged.length - 1];
+      setActiveIncident(latest);
+      setIsAlertModalOpen(true);
+    }
+  }, [s?.incidents, acknowledgedIncidents, activeIncident, isAlertModalOpen]);
+
+  const handleCloseAlertModal = () => {
+    if (activeIncident) {
+      setAcknowledgedIncidents((prev) => new Set(prev).add(activeIncident.incident_id));
+    }
+    setIsAlertModalOpen(false);
+  };
+
+  const handleOpenAnalysis = (analysisId: string) => {
+    if (activeIncident) {
+      setAcknowledgedIncidents((prev) => new Set(prev).add(activeIncident.incident_id));
+    }
+    setIsAlertModalOpen(false);
+    navigate({ to: "/analyses/$analysisId", params: { analysisId } });
+  };
+
   const onStart = () =>
     start.mutate(undefined, {
       onSuccess: (live) => {
         seen.current.clear();
+        setAcknowledgedIncidents(new Set());
+        setActiveIncident(null);
+        setIsAlertModalOpen(false);
         setSessionId(live.id);
         const demo = live.data_source === "demo";
         logEvent("INFO", liveStartMessage(demo, live.interface, live.capture_file), demo, `live-start:${live.id}`);
@@ -94,9 +145,12 @@ function LiveMonitor() {
     });
   };
 
+  const timelineEvents = useSecurityTimeline(s);
+
   const windows = s?.windows ?? [];
   const anomalies = windows.filter((w) => w.prediction === "ANOMALY").length;
   const recentAlert = windows.slice(-3).some((w) => w.prediction === "ANOMALY");
+  const confirmedIncidents = s?.incidents ?? [];
 
   return (
     <div>
@@ -176,6 +230,32 @@ function LiveMonitor() {
         </div>
 
         <div className="min-w-0 space-y-6">
+          {confirmedIncidents.length > 0 && (
+            <div className="surface flex flex-wrap items-center justify-between gap-3 border-l-4 border-l-destructive bg-destructive/10 p-4">
+              <div className="flex items-center gap-3">
+                <ShieldAlert className="size-5 shrink-0 text-destructive" />
+                <div>
+                  <div className="font-semibold text-sm text-foreground">
+                    Confirmed Security Incident: {confirmedIncidents[confirmedIncidents.length - 1].incident_id}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {confirmedIncidents.length} incident{confirmedIncidents.length > 1 ? "s" : ""} confirmed by backend Isolation Forest
+                  </div>
+                </div>
+              </div>
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={() => {
+                  setActiveIncident(confirmedIncidents[confirmedIncidents.length - 1]);
+                  setIsAlertModalOpen(true);
+                }}
+              >
+                View SOC Alert
+              </Button>
+            </div>
+          )}
+
           {capturing && (
             <div
               className={cn(
@@ -223,8 +303,18 @@ function LiveMonitor() {
           <Panel title="Detection matrix" aside={<span className="text-xs text-muted-foreground">newest first · click a row for features</span>}>
             {windows.length ? <DetectionTable windows={windows} newestFirst maxHeight={420} /> : <EmptyState title="No windows scored yet" />}
           </Panel>
+
+          <SecurityEventTimeline events={timelineEvents} capturing={capturing} />
         </div>
       </div>
+
+      <SecurityAlertModal
+        incident={activeIncident}
+        session={s ?? null}
+        isOpen={isAlertModalOpen}
+        onClose={handleCloseAlertModal}
+        onOpenAnalysis={handleOpenAnalysis}
+      />
     </div>
   );
 }

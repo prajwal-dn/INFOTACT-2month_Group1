@@ -239,6 +239,14 @@ export const LiveAttackResult = z.object({
 });
 export type LiveAttackResult = z.infer<typeof LiveAttackResult>;
 
+export const LiveIncident = Incident.passthrough().extend({
+  analysis_id: z.string().optional(),
+  analysis_registered: z.boolean().optional(),
+  response_state: z.string().optional(),
+  response_result: z.record(z.string(), z.unknown()).optional(),
+});
+export type LiveIncident = z.infer<typeof LiveIncident>;
+
 export const LiveSession = z.object({
   id: z.string(),
   data_source: DataSource,
@@ -252,7 +260,7 @@ export const LiveSession = z.object({
   /** Newest, possibly incomplete window that is not scored yet. */
   pending_window_index: z.number().nullable(),
   message: z.string().nullable(),
-  incidents: z.array(z.unknown()).optional(),
+  incidents: z.array(LiveIncident).optional(),
   attack: LiveAttack.optional(),
   recovery: LiveRecovery.optional(),
 });
