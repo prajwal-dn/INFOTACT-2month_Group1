@@ -23,15 +23,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import {
-  Activity,
-  AlertTriangle,
-  BarChart2,
-  Cpu,
-  Layers,
-  Radio,
-  TrendingUp,
-} from "lucide-react";
+import { Activity, AlertTriangle, BarChart2, Cpu, Layers, Radio, TrendingUp } from "lucide-react";
 
 import { Panel } from "@/components/app/primitives";
 import type { InferenceWindow } from "@/lib/api/schemas";
@@ -54,7 +46,8 @@ export function RealTimeTrafficMonitor({
   const currentFps = latestWindow ? latestWindow.features.total_frames : 0;
   const fpsList = windows.map((w) => w.features.total_frames);
   const peakFps = fpsList.length > 0 ? Math.max(...fpsList) : 0;
-  const avgFps = fpsList.length > 0 ? Math.round(fpsList.reduce((a, b) => a + b, 0) / fpsList.length) : 0;
+  const avgFps =
+    fpsList.length > 0 ? Math.round(fpsList.reduce((a, b) => a + b, 0) / fpsList.length) : 0;
 
   // Volume over time chart data
   const volumeData = useMemo(() => {
@@ -155,11 +148,17 @@ export function RealTimeTrafficMonitor({
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div className="rounded-lg border border-border/60 bg-secondary/30 p-3">
             <div className="flex items-center justify-between text-muted-foreground mb-1">
-              <span className="text-[0.68rem] font-semibold uppercase tracking-wider">Current Throughput</span>
+              <span className="text-[0.68rem] font-semibold uppercase tracking-wider">
+                Current Throughput
+              </span>
               <Activity className="size-3.5 text-cyan-400" />
             </div>
             <div className="font-mono text-xl font-bold text-foreground">
-              {capturing && latestWindow ? `${currentFps.toLocaleString()} fps` : capturing ? "Buffering…" : "0 fps"}
+              {capturing && latestWindow
+                ? `${currentFps.toLocaleString()} fps`
+                : capturing
+                  ? "Buffering…"
+                  : "0 fps"}
             </div>
             <div className="text-[0.65rem] text-muted-foreground mt-0.5">
               1-second window frame rate
@@ -168,7 +167,9 @@ export function RealTimeTrafficMonitor({
 
           <div className="rounded-lg border border-border/60 bg-secondary/30 p-3">
             <div className="flex items-center justify-between text-muted-foreground mb-1">
-              <span className="text-[0.68rem] font-semibold uppercase tracking-wider">Peak Bus Load</span>
+              <span className="text-[0.68rem] font-semibold uppercase tracking-wider">
+                Peak Bus Load
+              </span>
               <TrendingUp className="size-3.5 text-amber-400" />
             </div>
             <div className="font-mono text-xl font-bold text-foreground">
@@ -181,20 +182,22 @@ export function RealTimeTrafficMonitor({
 
           <div className="rounded-lg border border-border/60 bg-secondary/30 p-3">
             <div className="flex items-center justify-between text-muted-foreground mb-1">
-              <span className="text-[0.68rem] font-semibold uppercase tracking-wider">Average Cadence</span>
+              <span className="text-[0.68rem] font-semibold uppercase tracking-wider">
+                Average Cadence
+              </span>
               <Cpu className="size-3.5 text-emerald-400" />
             </div>
             <div className="font-mono text-xl font-bold text-foreground">
               {avgFps > 0 ? `${avgFps.toLocaleString()} fps` : "—"}
             </div>
-            <div className="text-[0.65rem] text-muted-foreground mt-0.5">
-              Mean nominal bus rate
-            </div>
+            <div className="text-[0.65rem] text-muted-foreground mt-0.5">Mean nominal bus rate</div>
           </div>
 
           <div className="rounded-lg border border-border/60 bg-secondary/30 p-3">
             <div className="flex items-center justify-between text-muted-foreground mb-1">
-              <span className="text-[0.68rem] font-semibold uppercase tracking-wider">Extended 29-bit</span>
+              <span className="text-[0.68rem] font-semibold uppercase tracking-wider">
+                Extended 29-bit
+              </span>
               <Layers className="size-3.5 text-amber-500" />
             </div>
             <div className="font-mono text-xl font-bold text-foreground">
@@ -210,12 +213,12 @@ export function RealTimeTrafficMonitor({
 
         {/* Traffic volume over time chart */}
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               <BarChart2 className="size-3.5" />
               Traffic Volume Over Time (Frames / Second)
             </div>
-            <div className="flex items-center gap-3 text-[0.68rem] text-muted-foreground font-mono">
+            <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-[0.68rem] text-muted-foreground font-mono">
               <span className="flex items-center gap-1">
                 <span className="size-2 rounded-full bg-cyan-400 inline-block" /> Standard CAN
               </span>
@@ -231,7 +234,10 @@ export function RealTimeTrafficMonitor({
           <div className="h-64 w-full rounded-lg border border-border/60 bg-secondary/20 p-2">
             {windows.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={volumeData} margin={{ top: 10, right: 12, bottom: 0, left: -18 }}>
+                <ComposedChart
+                  data={volumeData}
+                  margin={{ top: 10, right: 12, bottom: 0, left: -18 }}
+                >
                   <defs>
                     <linearGradient id="standard-fill" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.3} />
@@ -299,7 +305,9 @@ export function RealTimeTrafficMonitor({
               </ResponsiveContainer>
             ) : (
               <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                {capturing ? "Collecting first 1-second window…" : "Start capture to visualize live traffic volume"}
+                {capturing
+                  ? "Collecting first 1-second window…"
+                  : "Start capture to visualize live traffic volume"}
               </div>
             )}
           </div>
@@ -316,16 +324,14 @@ export function RealTimeTrafficMonitor({
             </span>
           </div>
 
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
             {idDistribution.map((item) => (
               <div
                 key={item.id}
                 className="rounded-lg border border-border/60 bg-secondary/30 p-2.5 flex flex-col justify-between"
               >
                 <div className="flex items-center justify-between mb-1.5">
-                  <span className="font-mono text-xs font-semibold text-foreground">
-                    {item.id}
-                  </span>
+                  <span className="font-mono text-xs font-semibold text-foreground">{item.id}</span>
                   <span className="text-[0.65rem] text-muted-foreground">{item.type}</span>
                 </div>
                 <div className="flex items-baseline justify-between">
@@ -356,7 +362,13 @@ export function RealTimeTrafficMonitor({
               Measured Data vs. Estimated Attribution Policy
             </p>
             <p className="text-[0.68rem] leading-relaxed">
-              Window frame counts, standard vs. extended formats, and anomaly scores are directly measured from the raw Linux socketCAN interface. When Mode 1 flooding is active concurrently with normal traffic, frames with ID <code className="font-mono text-foreground font-bold">0x100</code> are shared between the legitimate RPM generator and the flood adversary. In compliance with SOC audit standards, frame counts for ID 0x100 during active flooding are labeled as <strong className="text-foreground">ESTIMATED</strong>.
+              Window frame counts, standard vs. extended formats, and anomaly scores are directly
+              measured from the raw Linux socketCAN interface. When Mode 1 flooding is active
+              concurrently with normal traffic, frames with ID{" "}
+              <code className="font-mono text-foreground font-bold">0x100</code> are shared between
+              the legitimate RPM generator and the flood adversary. In compliance with SOC audit
+              standards, frame counts for ID 0x100 during active flooding are labeled as{" "}
+              <strong className="text-foreground">ESTIMATED</strong>.
             </p>
           </div>
         </div>
@@ -364,4 +376,3 @@ export function RealTimeTrafficMonitor({
     </Panel>
   );
 }
-

@@ -1,6 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Activity, AlertCircle, AlertOctagon, AlertTriangle, Loader2, Play, Radio, ShieldAlert, Square, Zap } from "lucide-react";
+import {
+  Activity,
+  AlertCircle,
+  AlertOctagon,
+  AlertTriangle,
+  Loader2,
+  Play,
+  Radio,
+  ShieldAlert,
+  Square,
+  Zap,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -44,7 +55,11 @@ import { pageHead } from "@/lib/head";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/live")({
-  head: () => pageHead("Live monitor", "Start a capture on the virtual vcan0 interface and watch completed windows scored in real time."),
+  head: () =>
+    pageHead(
+      "Live monitor",
+      "Start a capture on the virtual vcan0 interface and watch completed windows scored in real time.",
+    ),
   component: LiveMonitor,
 });
 
@@ -82,7 +97,10 @@ function LiveMonitor() {
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const allIncidents = useAllIncidents();
 
-  useEffect(() => setActiveLiveSession(capturing && sessionId ? sessionId : null), [capturing, sessionId]);
+  useEffect(
+    () => setActiveLiveSession(capturing && sessionId ? sessionId : null),
+    [capturing, sessionId],
+  );
   const ready = checksFor(status.data).every((c) => c.ok || c.demo);
 
   // Monitor windows for anomaly toasts
@@ -93,7 +111,12 @@ function LiveMonitor() {
       seen.current.add(w.window_index);
       if (w.prediction === "ANOMALY") {
         const demo = s.data_source === "demo";
-        logEvent("ALERT", liveAnomalyMessage(demo, w), demo, `live-anomaly:${s.id}:${w.window_index}`);
+        logEvent(
+          "ALERT",
+          liveAnomalyMessage(demo, w),
+          demo,
+          `live-anomaly:${s.id}:${w.window_index}`,
+        );
         toast.error(`Intrusion alert · window #${w.window_index}`, {
           id: "live-alert",
           description: `${s.data_source === "demo" ? "DEMO · " : ""}Score ${w.anomaly_score.toFixed(4)} · ${w.features.unique_can_ids} IDs · ${w.features.total_frames} frames`,
@@ -150,7 +173,12 @@ function LiveMonitor() {
         setIsAlertModalOpen(false);
         setSessionId(live.id);
         const demo = live.data_source === "demo";
-        logEvent("INFO", liveStartMessage(demo, live.interface, live.capture_file), demo, `live-start:${live.id}`);
+        logEvent(
+          "INFO",
+          liveStartMessage(demo, live.interface, live.capture_file),
+          demo,
+          `live-start:${live.id}`,
+        );
       },
       onError: (e) => toast.error("Capture failed to start", { description: e.message }),
     });
@@ -165,10 +193,12 @@ function LiveMonitor() {
       {
         onSuccess: (result) =>
           toast.success(`Normal traffic generator started · PID ${result.pid ?? "—"}`, {
-            description: "Transmitting legitimate RPM (0x100), Speed (0x101), and Coolant (0x102) frames.",
+            description:
+              "Transmitting legitimate RPM (0x100), Speed (0x101), and Coolant (0x102) frames.",
           }),
-        onError: (e) => toast.error("Normal traffic generator failed to start", { description: e.message }),
-      }
+        onError: (e) =>
+          toast.error("Normal traffic generator failed to start", { description: e.message }),
+      },
     );
   };
 
@@ -187,10 +217,13 @@ function LiveMonitor() {
       {
         onSuccess: (result) =>
           toast.success(`Attack simulator started · Mode ${result.mode} · PID ${result.pid}`, {
-            description: result.mode === 1 ? "Flooding 0x100 @ 1ms" : "Injecting unexpected extended ID 0x999 @ 50ms",
+            description:
+              result.mode === 1
+                ? "Flooding 0x100 @ 1ms"
+                : "Injecting unexpected extended ID 0x999 @ 50ms",
           }),
         onError: (e) => toast.error("Attack simulator failed to start", { description: e.message }),
-      }
+      },
     );
   };
 
@@ -207,7 +240,12 @@ function LiveMonitor() {
     stop.mutate(sessionId, {
       onSuccess: (a) => {
         const demo = a.data_source === "demo";
-        logEvent(a.anomaly_count ? "ALERT" : "SUCCESS", liveStopMessage(demo, a), demo, `analysis:${a.id}`);
+        logEvent(
+          a.anomaly_count ? "ALERT" : "SUCCESS",
+          liveStopMessage(demo, a),
+          demo,
+          `analysis:${a.id}`,
+        );
         setSessionId(null);
         navigate({ to: "/analyses/$analysisId", params: { analysisId: a.id } });
       },
@@ -227,12 +265,17 @@ function LiveMonitor() {
     <div>
       <PageHeader
         eyebrow="Live monitor"
-        title={<span className="flex items-center gap-3">Capture on vcan0 <DemoBadge /></span>}
+        title={
+          <span className="flex items-center gap-3">
+            Capture on vcan0 <DemoBadge />
+          </span>
+        }
         description="The backend starts the C sniffer on the isolated virtual interface. Each completed 1-second window is scored with the saved model; the newest window stays pending until it closes."
         actions={
           capturing || stop.isPending ? (
             <Button variant="destructive" size="lg" onClick={onStop} disabled={stop.isPending}>
-              {stop.isPending ? <Loader2 className="animate-spin" /> : <Square />} Stop &amp; analyze
+              {stop.isPending ? <Loader2 className="animate-spin" /> : <Square />} Stop &amp;
+              analyze
             </Button>
           ) : (
             <Button variant="live" size="lg" onClick={onStart} disabled={start.isPending || !ready}>
@@ -251,15 +294,29 @@ function LiveMonitor() {
         />
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+      {/* Phase 6: System Health Monitoring — full-width above the two-column grid */}
+      <div className="mb-6">
+        <SystemHealthMonitor
+          status={status.data}
+          session={s ?? null}
+          isStatusError={status.isError}
+        />
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-[minmax(300px,360px)_minmax(0,1fr)]">
         <div className="space-y-6">
           <Panel title="Pre-flight checks">
-            {status.isError ? <ErrorState error={status.error} /> : <SystemChecks status={status.data} />}
+            {status.isError ? (
+              <ErrorState error={status.error} />
+            ) : (
+              <SystemChecks status={status.data} />
+            )}
             {!ready && status.data && (
               <p className="mt-3 text-xs text-muted-foreground">
                 Bring vcan0 up on the backend host:
                 <code className="mt-1 block rounded-md bg-secondary p-2 font-mono text-[0.68rem] text-foreground">
-                  sudo modprobe vcan{"\n"}sudo ip link add dev vcan0 type vcan{"\n"}sudo ip link set up vcan0
+                  sudo modprobe vcan{"\n"}sudo ip link add dev vcan0 type vcan{"\n"}sudo ip link set
+                  up vcan0
                 </code>
               </p>
             )}
@@ -267,7 +324,14 @@ function LiveMonitor() {
           <Panel title="Session">
             {s ? (
               <dl className="space-y-2 font-mono text-xs">
-                <Row k="state" v={<span className={cn(capturing ? "text-warning" : "text-muted-foreground")}>{s.state}</span>} />
+                <Row
+                  k="state"
+                  v={
+                    <span className={cn(capturing ? "text-warning" : "text-muted-foreground")}>
+                      {s.state}
+                    </span>
+                  }
+                />
                 <Row k="elapsed" v={elapsed(s.started_at)} />
                 <Row k="frames" v={s.frames_captured.toLocaleString()} />
                 <Row k="pending window" v={s.pending_window_index ?? "—"} />
@@ -278,14 +342,20 @@ function LiveMonitor() {
             )}
             {demo && (
               <p className="mt-3 rounded-lg border border-demo/30 bg-demo/10 p-2.5 text-[0.7rem] leading-relaxed text-demo">
-                Demo follows a scripted timeline with two illustrative anomaly bursts. Nothing is captured.
+                Demo follows a scripted timeline with two illustrative anomaly bursts. Nothing is
+                captured.
               </p>
             )}
           </Panel>
-          { !demo && capturing && s?.interface === "vcan0" && (
-            <Panel title="Traffic Simulation Control" aside={<span className="text-xs text-muted-foreground">vcan0 only</span>}>
+          {!demo && capturing && s?.interface === "vcan0" && (
+            <Panel
+              title="Traffic Simulation Control"
+              aside={<span className="text-xs text-muted-foreground">vcan0 only</span>}
+            >
               <p className="text-xs leading-relaxed text-muted-foreground">
-                Run legitimate and malicious CAN generators simultaneously. Automated response terminates only the malicious simulator process while normal traffic flows continuously.
+                Run legitimate and malicious CAN generators simultaneously. Automated response
+                terminates only the malicious simulator process while normal traffic flows
+                continuously.
               </p>
 
               {/* Normal Traffic Controls */}
@@ -294,12 +364,17 @@ function LiveMonitor() {
                   <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                     <Activity className="size-3.5 text-emerald-500" /> Normal Traffic
                   </span>
-                  <span className={cn("text-[0.68rem] font-mono font-semibold px-1.5 py-0.5 rounded border",
-                    isNormalRunning
-                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
-                      : "border-border/60 bg-secondary/60 text-muted-foreground"
-                  )}>
-                    {isNormalRunning ? `RUNNING (PID ${s?.normal?.pid ?? "—"})` : s?.normal?.state ?? "NOT_STARTED"}
+                  <span
+                    className={cn(
+                      "text-[0.68rem] font-mono font-semibold px-1.5 py-0.5 rounded border",
+                      isNormalRunning
+                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                        : "border-border/60 bg-secondary/60 text-muted-foreground",
+                    )}
+                  >
+                    {isNormalRunning
+                      ? `RUNNING (PID ${s?.normal?.pid ?? "—"})`
+                      : (s?.normal?.state ?? "NOT_STARTED")}
                   </span>
                 </div>
                 <p className="text-[0.7rem] text-muted-foreground mb-3">
@@ -312,7 +387,12 @@ function LiveMonitor() {
                     onClick={onStartNormal}
                     disabled={startNormal.isPending || isNormalRunning || !capturing}
                   >
-                    {startNormal.isPending ? <Loader2 className="animate-spin" /> : <Play className="size-3.5" />} Start Normal Traffic
+                    {startNormal.isPending ? (
+                      <Loader2 className="animate-spin" />
+                    ) : (
+                      <Play className="size-3.5" />
+                    )}{" "}
+                    Start Normal Traffic
                   </Button>
                   <Button
                     size="sm"
@@ -320,7 +400,12 @@ function LiveMonitor() {
                     onClick={onStopNormal}
                     disabled={stopNormal.isPending || !isNormalRunning}
                   >
-                    {stopNormal.isPending ? <Loader2 className="animate-spin" /> : <Square className="size-3.5" />} Stop Normal Traffic
+                    {stopNormal.isPending ? (
+                      <Loader2 className="animate-spin" />
+                    ) : (
+                      <Square className="size-3.5" />
+                    )}{" "}
+                    Stop Normal Traffic
                   </Button>
                 </div>
               </div>
@@ -331,12 +416,17 @@ function LiveMonitor() {
                   <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                     <Zap className="size-3.5 text-amber-500" /> Attack Simulator
                   </span>
-                  <span className={cn("text-[0.68rem] font-mono font-semibold px-1.5 py-0.5 rounded border",
-                    isAttackRunning
-                      ? "border-destructive/30 bg-destructive/10 text-destructive animate-pulse"
-                      : "border-border/60 bg-secondary/60 text-muted-foreground"
-                  )}>
-                    {isAttackRunning ? `RUNNING (Mode ${s?.attack?.mode ?? attackMode})` : s?.attack?.state ?? "NOT_STARTED"}
+                  <span
+                    className={cn(
+                      "text-[0.68rem] font-mono font-semibold px-1.5 py-0.5 rounded border",
+                      isAttackRunning
+                        ? "border-destructive/30 bg-destructive/10 text-destructive animate-pulse"
+                        : "border-border/60 bg-secondary/60 text-muted-foreground",
+                    )}
+                  >
+                    {isAttackRunning
+                      ? `RUNNING (Mode ${s?.attack?.mode ?? attackMode})`
+                      : (s?.attack?.state ?? "NOT_STARTED")}
                   </span>
                 </div>
                 <div className="mb-2 flex flex-wrap gap-2">
@@ -362,9 +452,18 @@ function LiveMonitor() {
                     size="sm"
                     variant="destructive"
                     onClick={onStartAttack}
-                    disabled={attack.isPending || isAttackRunning || s?.recovery?.state === "ATTACK_STOPPED_VERIFYING"}
+                    disabled={
+                      attack.isPending ||
+                      isAttackRunning ||
+                      s?.recovery?.state === "ATTACK_STOPPED_VERIFYING"
+                    }
                   >
-                    {attack.isPending ? <Loader2 className="animate-spin" /> : <Zap className="size-3.5" />} Start Attack Traffic
+                    {attack.isPending ? (
+                      <Loader2 className="animate-spin" />
+                    ) : (
+                      <Zap className="size-3.5" />
+                    )}{" "}
+                    Start Attack Traffic
                   </Button>
                 </div>
               </div>
@@ -378,7 +477,12 @@ function LiveMonitor() {
                   onClick={onStopAllSimulations}
                   disabled={stopSimulations.isPending || (!isNormalRunning && !isAttackRunning)}
                 >
-                  {stopSimulations.isPending ? <Loader2 className="animate-spin" /> : <AlertOctagon className="size-3.5" />} Stop All Simulations
+                  {stopSimulations.isPending ? (
+                    <Loader2 className="animate-spin" />
+                  ) : (
+                    <AlertOctagon className="size-3.5" />
+                  )}{" "}
+                  Stop All Simulations
                 </Button>
               </div>
 
@@ -387,16 +491,32 @@ function LiveMonitor() {
                 <Row
                   k="normal generator"
                   v={
-                    <span className={cn(isNormalRunning ? "text-emerald-500 font-semibold" : "text-muted-foreground")}>
-                      {isNormalRunning ? `ACTIVE (PID ${s?.normal?.pid ?? "—"})` : s?.normal?.state ?? "NOT_STARTED"}
+                    <span
+                      className={cn(
+                        isNormalRunning
+                          ? "text-emerald-500 font-semibold"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      {isNormalRunning
+                        ? `ACTIVE (PID ${s?.normal?.pid ?? "—"})`
+                        : (s?.normal?.state ?? "NOT_STARTED")}
                     </span>
                   }
                 />
                 <Row
                   k="attack simulator"
                   v={
-                    <span className={cn(isAttackRunning ? "text-destructive font-semibold" : "text-muted-foreground")}>
-                      {isAttackRunning ? `ACTIVE (Mode ${s?.attack?.mode ?? attackMode})` : s?.attack?.state ?? "NOT_STARTED"}
+                    <span
+                      className={cn(
+                        isAttackRunning
+                          ? "text-destructive font-semibold"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      {isAttackRunning
+                        ? `ACTIVE (Mode ${s?.attack?.mode ?? attackMode})`
+                        : (s?.attack?.state ?? "NOT_STARTED")}
                     </span>
                   }
                 />
@@ -404,7 +524,9 @@ function LiveMonitor() {
                   k="concurrent state"
                   v={
                     isNormalRunning && isAttackRunning ? (
-                      <span className="text-amber-400 font-semibold">CONCURRENT (Normal + Attack)</span>
+                      <span className="text-amber-400 font-semibold">
+                        CONCURRENT (Normal + Attack)
+                      </span>
                     ) : isNormalRunning ? (
                       <span className="text-emerald-400">Normal Only</span>
                     ) : isAttackRunning ? (
@@ -415,27 +537,27 @@ function LiveMonitor() {
                   }
                 />
                 <Row k="recovery state" v={s?.recovery?.state ?? "NOT_STARTED"} />
-                <Row k="normal windows" v={`${s?.recovery?.normal_windows ?? 0} / ${s?.recovery?.required_normal_windows ?? 2}`} />
+                <Row
+                  k="normal windows"
+                  v={`${s?.recovery?.normal_windows ?? 0} / ${s?.recovery?.required_normal_windows ?? 2}`}
+                />
               </dl>
               {s?.recovery?.state === "RECOVERED" && (
                 <p className="mt-3 text-xs text-success">
-                  {s.recovery.required_normal_windows ?? 2} consecutive normal model windows observed after the simulator stopped. Legitimate traffic was maintained throughout recovery.
+                  {s.recovery.required_normal_windows ?? 2} consecutive normal model windows
+                  observed after the simulator stopped. Legitimate traffic was maintained throughout
+                  recovery.
                 </p>
               )}
               {s?.recovery?.state === "ATTACK_STOPPED_VERIFYING" && (
                 <p className="mt-3 text-xs text-warning">
-                  Attack simulator stopped automatically. Waiting for {s.recovery.required_normal_windows ?? 2} consecutive normal windows while legitimate traffic flows…
+                  Attack simulator stopped automatically. Waiting for{" "}
+                  {s.recovery.required_normal_windows ?? 2} consecutive normal windows while
+                  legitimate traffic flows…
                 </p>
               )}
             </Panel>
           )}
-
-          {/* Phase 6: System Health Monitoring */}
-          <SystemHealthMonitor
-            status={status.data}
-            session={s ?? null}
-            isStatusError={status.isError}
-          />
         </div>
 
         <div className="min-w-0 space-y-6">
@@ -460,10 +582,12 @@ function LiveMonitor() {
                 <ShieldAlert className="size-5 shrink-0 text-destructive" />
                 <div>
                   <div className="font-semibold text-sm text-foreground">
-                    Confirmed Security Incident: {confirmedIncidents[confirmedIncidents.length - 1]?.incident_id ?? "—"}
+                    Confirmed Security Incident:{" "}
+                    {confirmedIncidents[confirmedIncidents.length - 1]?.incident_id ?? "—"}
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    {confirmedIncidents.length} incident{confirmedIncidents.length > 1 ? "s" : ""} confirmed by backend Isolation Forest
+                    {confirmedIncidents.length} incident{confirmedIncidents.length > 1 ? "s" : ""}{" "}
+                    confirmed by backend Isolation Forest
                   </div>
                 </div>
               </div>
@@ -506,24 +630,44 @@ function LiveMonitor() {
                 recentAlert && "surface-alert",
               )}
             >
-              <span className={cn("size-2.5 rounded-full animate-pulse-dot", recentAlert ? "bg-destructive" : "bg-success")} />
+              <span
+                className={cn(
+                  "size-2.5 rounded-full animate-pulse-dot",
+                  recentAlert ? "bg-destructive" : "bg-success",
+                )}
+              />
               <div className="flex-1">
                 <div className="font-display text-lg font-semibold">
                   {recentAlert ? "Anomalous traffic detected" : "Bus traffic within baseline"}
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  {windows.length} windows scored · {anomalies} anomalous · window #{s?.pending_window_index ?? 0} pending
+                  {windows.length} windows scored · {anomalies} anomalous · window #
+                  {s?.pending_window_index ?? 0} pending
                 </div>
               </div>
               {recentAlert && <ShieldAlert className="size-6 text-destructive" />}
               <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px overflow-hidden">
-                <div className={cn("h-px w-1/3 animate-sweep", recentAlert ? "bg-destructive" : "bg-primary")} />
+                <div
+                  className={cn(
+                    "h-px w-1/3 animate-sweep",
+                    recentAlert ? "bg-destructive" : "bg-primary",
+                  )}
+                />
               </div>
             </div>
           )}
 
           <MetricGrid
-            metrics={s ? { total: windows.length, normal: windows.length - anomalies, anomalies, rate: windows.length ? (anomalies / windows.length) * 100 : 0 } : null}
+            metrics={
+              s
+                ? {
+                    total: windows.length,
+                    normal: windows.length - anomalies,
+                    anomalies,
+                    rate: windows.length ? (anomalies / windows.length) * 100 : 0,
+                  }
+                : null
+            }
           />
 
           {/* Phase 6: Real-Time CAN Traffic Monitoring */}
@@ -537,7 +681,13 @@ function LiveMonitor() {
 
           {s && (
             <BusActivityWave
-              source={{ kind: "live", windows, pendingWindowIndex: s.pending_window_index, dataSource: s.data_source, capturing }}
+              source={{
+                kind: "live",
+                windows,
+                pendingWindowIndex: s.pending_window_index,
+                dataSource: s.data_source,
+                capturing,
+              }}
               height={120}
             />
           )}
@@ -546,12 +696,29 @@ function LiveMonitor() {
             {windows.length ? (
               <ThreatChart windows={windows} height={260} />
             ) : (
-              <EmptyState title={capturing ? "Waiting for a completed window…" : "Start a capture to stream results"} />
+              <EmptyState
+                title={
+                  capturing
+                    ? "Waiting for a completed window…"
+                    : "Start a capture to stream results"
+                }
+              />
             )}
           </Panel>
 
-          <Panel title="Detection matrix" aside={<span className="text-xs text-muted-foreground">newest first · click a row for features</span>}>
-            {windows.length ? <DetectionTable windows={windows} newestFirst maxHeight={420} /> : <EmptyState title="No windows scored yet" />}
+          <Panel
+            title="Detection matrix"
+            aside={
+              <span className="text-xs text-muted-foreground">
+                newest first · click a row for features
+              </span>
+            }
+          >
+            {windows.length ? (
+              <DetectionTable windows={windows} newestFirst maxHeight={420} />
+            ) : (
+              <EmptyState title="No windows scored yet" />
+            )}
           </Panel>
 
           <AttackPreventionAnalytics analytics={attackAnalytics} capturing={capturing} />
@@ -565,7 +732,8 @@ function LiveMonitor() {
             title="Incident History & Investigation Reports"
             aside={
               <span className="text-xs text-muted-foreground">
-                {confirmedIncidents.length + (allIncidents.data?.length ?? 0)} total incidents recorded
+                {confirmedIncidents.length + (allIncidents.data?.length ?? 0)} total incidents
+                recorded
               </span>
             }
           >

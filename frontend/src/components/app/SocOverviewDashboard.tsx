@@ -57,7 +57,7 @@ export function SocOverviewDashboard({
 
   // Mitigation success: only confirmed exit code 0
   const successfulMitigations = attackHistory.filter(
-    (a) => a.state === "STOPPED" && a.return_code === 0
+    (a) => a.state === "STOPPED" && a.return_code === 0,
   ).length;
   const effectiveMitigations =
     successfulMitigations > 0
@@ -112,13 +112,13 @@ export function SocOverviewDashboard({
               "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 font-mono text-[0.68rem] font-semibold border",
               capturing
                 ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
-                : "border-border bg-secondary/60 text-muted-foreground"
+                : "border-border bg-secondary/60 text-muted-foreground",
             )}
           >
             <span
               className={cn(
                 "size-1.5 rounded-full",
-                capturing ? "bg-emerald-400 animate-pulse" : "bg-muted-foreground"
+                capturing ? "bg-emerald-400 animate-pulse" : "bg-muted-foreground",
               )}
             />
             {capturing ? `LIVE CAN · ${session?.interface ?? "vcan0"}` : "MONITORING STANDBY"}
@@ -126,7 +126,7 @@ export function SocOverviewDashboard({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 2xl:grid-cols-7">
         {/* 1. Confirmed Incidents */}
         <SocCard
           label="Confirmed Incidents"
@@ -225,21 +225,28 @@ interface SocCardProps {
 }
 
 const CARD_VARIANTS: Record<string, string> = {
-  default:  "border-border/60 bg-card text-foreground",
-  success:  "border-emerald-500/30 bg-emerald-500/5 text-emerald-400",
-  warning:  "border-amber-500/30 bg-amber-500/5 text-amber-400",
+  default: "border-border/60 bg-card text-foreground",
+  success: "border-emerald-500/30 bg-emerald-500/5 text-emerald-400",
+  warning: "border-amber-500/30 bg-amber-500/5 text-amber-400",
   critical: "border-destructive/30 bg-destructive/10 text-destructive",
-  info:     "border-cyan-500/30 bg-cyan-500/5 text-cyan-400",
-  muted:    "border-border/40 bg-secondary/20 text-muted-foreground",
+  info: "border-cyan-500/30 bg-cyan-500/5 text-cyan-400",
+  muted: "border-border/40 bg-secondary/20 text-muted-foreground",
 };
 
-function SocCard({ label, value, detail, icon, variant = "default", pulsing = false }: SocCardProps) {
+function SocCard({
+  label,
+  value,
+  detail,
+  icon,
+  variant = "default",
+  pulsing = false,
+}: SocCardProps) {
   return (
     <div
       className={cn(
         "rounded-xl border p-3 flex flex-col justify-between transition-all",
         CARD_VARIANTS[variant],
-        pulsing && "animate-pulse"
+        pulsing && "animate-pulse",
       )}
     >
       <div className="flex items-center justify-between gap-1 mb-1">
@@ -257,4 +264,3 @@ function SocCard({ label, value, detail, icon, variant = "default", pulsing = fa
     </div>
   );
 }
-

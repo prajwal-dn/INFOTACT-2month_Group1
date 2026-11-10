@@ -152,10 +152,16 @@ export function SystemHealthMonitor({
     if (session.attack.state === "RUNNING") {
       attackState = "RUNNING";
       attackDetail = `ACTIVE: Mode ${session.attack.mode ?? 1} (PID ${session.attack.pid ?? "—"})`;
-      attackDiagnostic = session.attack.mode === 1 ? "Transmitting high-frequency flood @ 1ms" : "Injecting unauthorized extended ID 0x999";
+      attackDiagnostic =
+        session.attack.mode === 1
+          ? "Transmitting high-frequency flood @ 1ms"
+          : "Injecting unauthorized extended ID 0x999";
     } else if (session.attack.state === "STOPPED") {
       attackState = "STOPPED";
-      attackDetail = session.attack.return_code === 0 ? "TERMINATED (rc=0 clean exit)" : `STOPPED (rc=${session.attack.return_code ?? "—"})`;
+      attackDetail =
+        session.attack.return_code === 0
+          ? "TERMINATED (rc=0 clean exit)"
+          : `STOPPED (rc=${session.attack.return_code ?? "—"})`;
       attackDiagnostic = "Adversary terminated by automated response engine";
     } else {
       attackState = "STOPPED";
@@ -278,32 +284,38 @@ export function SystemHealthMonitor({
                   ? "border-destructive/40 bg-destructive/10"
                   : sub.state === "STOPPED"
                     ? "border-border/60 bg-secondary/20"
-                    : "border-border/40 bg-secondary/10"
+                    : "border-border/40 bg-secondary/10",
             )}
           >
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground">{sub.icon}</span>
-                  <div>
-                    <h3 className="text-xs font-semibold text-foreground leading-none">
+              {/* Header: icon + name on left, badge on right — prevent overlap */}
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <div className="flex items-start gap-2 min-w-0 flex-1">
+                  <span className="mt-0.5 shrink-0 text-muted-foreground">{sub.icon}</span>
+                  <div className="min-w-0">
+                    <h3 className="text-xs font-semibold text-foreground leading-snug">
                       {sub.name}
                     </h3>
-                    <span className="text-[0.65rem] text-muted-foreground">
-                      {sub.category}
-                    </span>
+                    <span className="text-[0.65rem] text-muted-foreground">{sub.category}</span>
                   </div>
                 </div>
-
-                <StateBadge state={sub.state} />
+                <div className="shrink-0 mt-0.5">
+                  <StateBadge state={sub.state} />
+                </div>
               </div>
 
-              <p className="font-mono text-xs text-foreground font-medium truncate" title={sub.detail}>
+              <p
+                className="font-mono text-xs text-foreground font-medium break-all"
+                title={sub.detail}
+              >
                 {sub.detail}
               </p>
             </div>
 
-            <p className="mt-2 text-[0.65rem] text-muted-foreground truncate border-t border-border/40 pt-1.5" title={sub.diagnostic}>
+            <p
+              className="mt-2 text-[0.65rem] text-muted-foreground break-words border-t border-border/40 pt-1.5"
+              title={sub.diagnostic}
+            >
               {sub.diagnostic}
             </p>
           </div>
@@ -318,8 +330,8 @@ export function SystemHealthMonitor({
 function StateBadge({ state }: { state: HealthState }) {
   if (state === "RUNNING") {
     return (
-      <span className="flex items-center gap-1 rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[0.62rem] font-bold text-emerald-400">
-        <CheckCircle2 className="size-3" />
+      <span className="inline-flex items-center gap-1 whitespace-nowrap rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[0.62rem] font-bold text-emerald-400 shrink-0">
+        <CheckCircle2 className="size-3 shrink-0" />
         RUNNING
       </span>
     );
@@ -327,8 +339,8 @@ function StateBadge({ state }: { state: HealthState }) {
 
   if (state === "STOPPED") {
     return (
-      <span className="flex items-center gap-1 rounded border border-border/80 bg-secondary px-1.5 py-0.5 font-mono text-[0.62rem] font-semibold text-muted-foreground">
-        <span className="size-1.5 rounded-full bg-muted-foreground" />
+      <span className="inline-flex items-center gap-1 whitespace-nowrap rounded border border-border/80 bg-secondary px-1.5 py-0.5 font-mono text-[0.62rem] font-semibold text-muted-foreground shrink-0">
+        <span className="size-1.5 rounded-full bg-muted-foreground shrink-0" />
         STOPPED
       </span>
     );
@@ -336,18 +348,17 @@ function StateBadge({ state }: { state: HealthState }) {
 
   if (state === "ERROR") {
     return (
-      <span className="flex items-center gap-1 rounded border border-destructive/40 bg-destructive/15 px-1.5 py-0.5 font-mono text-[0.62rem] font-bold text-destructive">
-        <XCircle className="size-3" />
+      <span className="inline-flex items-center gap-1 whitespace-nowrap rounded border border-destructive/40 bg-destructive/15 px-1.5 py-0.5 font-mono text-[0.62rem] font-bold text-destructive shrink-0">
+        <XCircle className="size-3 shrink-0" />
         ERROR
       </span>
     );
   }
 
   return (
-    <span className="flex items-center gap-1 rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[0.62rem] font-semibold text-amber-500">
-      <AlertTriangle className="size-3" />
+    <span className="inline-flex items-center gap-1 whitespace-nowrap rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[0.62rem] font-semibold text-amber-500 shrink-0">
+      <AlertTriangle className="size-3 shrink-0" />
       NOT CONFIGURED
     </span>
   );
 }
-
