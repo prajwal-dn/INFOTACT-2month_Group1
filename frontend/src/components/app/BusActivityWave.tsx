@@ -15,7 +15,7 @@ export type WaveSource =
 
 type Slot = { kind: "scored"; w: InferenceWindow } | { kind: "pending"; index: number };
 
-export function BusActivityWave({ source, maxBars = 60, height = 96 }: { source: WaveSource; maxBars?: number; height?: number }) {
+export function BusActivityWave({ source, maxBars = 60, height = 96, className }: { source: WaveSource; maxBars?: number; height?: number; className?: string }) {
   const [hover, setHover] = useState<number | null>(null);
 
   if (source.kind === "idle") {
@@ -49,7 +49,7 @@ export function BusActivityWave({ source, maxBars = 60, height = 96 }: { source:
   const barArea = height - 40;
 
   return (
-    <div data-testid="bus-wave" data-source={source.dataSource} className="rounded-xl border bg-background/40 px-4 py-3">
+    <div data-testid="bus-wave" data-source={source.dataSource} className={cn("rounded-xl border bg-background/40 px-4 py-3", className)}>
       <div className="flex flex-wrap items-center justify-between gap-2 font-mono text-[0.65rem] uppercase tracking-[0.14em] text-muted-foreground">
         <span className="flex items-center gap-1.5">
           <Activity className={cn("size-3.5", source.kind === "live" && source.capturing && "text-primary animate-pulse")} />

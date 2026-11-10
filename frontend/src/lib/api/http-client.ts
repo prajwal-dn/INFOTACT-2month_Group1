@@ -95,6 +95,16 @@ export function createHttpClient(baseUrl: string, fetchImpl: typeof fetch = fetc
       return { filename, csv: await res.text() };
     },
     startLiveCapture: () => json(LiveSession, endpoints.liveStart(), post()),
+    getActiveLiveSession: async () => {
+      try {
+        return await json(LiveSession, endpoints.liveActive());
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) {
+          return null;
+        }
+        throw err;
+      }
+    },
     getLiveSession: (id) => json(LiveSession, endpoints.live(id)),
     stopLiveCapture: (id) => json(AnalysisResult, endpoints.liveStop(id), post()),
     startLiveAttack: (id, mode) => json(LiveAttackResult, endpoints.liveAttack(id), post({ mode })),

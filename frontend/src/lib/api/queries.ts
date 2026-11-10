@@ -77,9 +77,30 @@ export function useLiveSession(id: string | null, polling: boolean) {
   });
 }
 
+export function useActiveLiveSessionQuery(enabled = true) {
+  const { client, scope } = useApi();
+  return useQuery({
+    queryKey: [...scope, "live-active"],
+    queryFn: () => client.getActiveLiveSession(),
+    enabled,
+    staleTime: 0,
+    refetchOnMount: true,
+    refetchInterval: enabled ? 2000 : false,
+    retry: false,
+  });
+}
+
 export function useStartLive() {
-  const { client } = useApi();
-  return useMutation({ mutationFn: () => client.startLiveCapture() });
+  const { client, scope } = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => client.startLiveCapture(),
+    onSuccess: (live) => {
+      qc.setQueryData([...scope, "live-active"], live);
+      qc.setQueryData([...scope, "live", live.id], live);
+      qc.invalidateQueries({ queryKey: [...scope, "live-active"] });
+    },
+  });
 }
 
 export function useStartLiveAttack() {
@@ -120,9 +141,17 @@ export function useStopLiveSimulations() {
 }
 
 export function useStopLive() {
-  const { client } = useApi();
+  const { client, scope } = useApi();
+  const qc = useQueryClient();
   const storeAnalysis = useStoreAnalysis();
-  return useMutation({ mutationFn: (id: string) => client.stopLiveCapture(id), onSuccess: storeAnalysis });
+  return useMutation({
+    mutationFn: (id: string) => client.stopLiveCapture(id),
+    onSuccess: (data) => {
+      qc.setQueryData([...scope, "live-active"], null);
+      qc.invalidateQueries({ queryKey: [...scope, "live-active"] });
+      storeAnalysis(data);
+    },
+  });
 }
 
 export function useDownloadReport() {

@@ -179,13 +179,18 @@ interface SecurityEventTimelineProps {
 }
 
 export function SecurityEventTimeline({ events, capturing = false }: SecurityEventTimelineProps) {
-  // Auto-scroll to top whenever a new event arrives
-  const topRef = useRef<HTMLDivElement>(null);
+  // Scroll the timeline's own container to the top (newest event) when new
+  // events arrive — but ONLY if the user is already near the top of that
+  // container.  We never call scrollIntoView() which would scroll the page.
+  const containerRef = useRef<HTMLDivElement>(null);
   const prevCount = useRef(0);
 
   useEffect(() => {
     if (events.length > prevCount.current) {
-      topRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      const el = containerRef.current;
+      if (el && el.scrollTop < 120) {
+        el.scrollTop = 0;
+      }
     }
     prevCount.current = events.length;
   }, [events.length]);
@@ -220,8 +225,7 @@ export function SecurityEventTimeline({ events, capturing = false }: SecurityEve
           </p>
         </div>
       ) : (
-        <div className="max-h-[480px] overflow-y-auto pr-1">
-          <div ref={topRef} />
+        <div ref={containerRef} className="max-h-[480px] overflow-y-auto pr-1">
           {displayEvents.map((ev) => (
             <EventRow key={ev.id} event={ev} />
           ))}

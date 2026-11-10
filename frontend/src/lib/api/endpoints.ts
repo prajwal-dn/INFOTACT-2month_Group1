@@ -8,6 +8,7 @@ export const endpoints = {
   report: (id: string) => `/api/analyses/${encodeURIComponent(id)}/report.csv`,
   incidents: () => "/api/incidents",
   liveStart: () => "/api/live/start",
+  liveActive: () => "/api/live/active",
   live: (id: string) => `/api/live/${encodeURIComponent(id)}`,
   liveStop: (id: string) => `/api/live/${encodeURIComponent(id)}/stop`,
   liveAttack: (id: string) => `/api/live/${encodeURIComponent(id)}/attack`,
@@ -17,13 +18,13 @@ export const endpoints = {
   liveSimulationsStop: (id: string) => `/api/live/${encodeURIComponent(id)}/simulations/stop`,
 
   responsePlan: (analysisId: string, incidentId: string) =>
-  `/api/analyses/${encodeURIComponent(analysisId)}/incidents/${encodeURIComponent(incidentId)}/response/plan`,
+    `/api/analyses/${encodeURIComponent(analysisId)}/incidents/${encodeURIComponent(incidentId)}/response/plan`,
 
   responseActivate: (analysisId: string, incidentId: string) =>
-  `/api/analyses/${encodeURIComponent(analysisId)}/incidents/${encodeURIComponent(incidentId)}/response/activate`,
+    `/api/analyses/${encodeURIComponent(analysisId)}/incidents/${encodeURIComponent(incidentId)}/response/activate`,
 
   responseVerify: (analysisId: string, incidentId: string) =>
-  `/api/analyses/${encodeURIComponent(analysisId)}/incidents/${encodeURIComponent(incidentId)}/response/verify`,
+    `/api/analyses/${encodeURIComponent(analysisId)}/incidents/${encodeURIComponent(incidentId)}/response/verify`,
 
   resilienceScenarios: () => "/api/resilience/scenarios",
   resilienceScenariosRun: () => "/api/resilience/scenarios/run",

@@ -678,10 +678,26 @@ def stop_live_simulations(session_id: str):
         )
 
 
+
+@app.get("/api/live/active")
+def get_active_live_session():
+    """Return the currently active live capture session if one is running."""
+    session = live_manager.get_active_session_snapshot(None)
+    if not session or session.get("state") not in ("capturing", "stopping"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active live capture session",
+        )
+    return session
+
+
 @app.get("/api/live/{session_id}")
 def get_live_session(session_id: str):
     """Poll live session state, captured frames count, and scored windows."""
-    session = live_manager.get_active_session_snapshot(session_id)
+    if session_id == "active":
+        session = live_manager.get_active_session_snapshot(None)
+    else:
+        session = live_manager.get_active_session_snapshot(session_id)
     if not session:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

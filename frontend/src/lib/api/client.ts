@@ -32,6 +32,7 @@ export interface ApiClient {
   /** Report CSV (reports/<capture>_inference.csv). */
   getReportCsv(id: string): Promise<{ filename: string; csv: string }>;
   startLiveCapture(): Promise<LiveSession>;
+  getActiveLiveSession(): Promise<LiveSession | null>;
   getLiveSession(id: string): Promise<LiveSession>;
   /** Stop capture and run final inference ("Stop & Analyze"). */
   stopLiveCapture(id: string): Promise<AnalysisResult>;

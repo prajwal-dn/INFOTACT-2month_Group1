@@ -333,6 +333,11 @@ export function createDemoClient(): ApiClient {
       lives.set(id, live);
       return { ...live.session };
     },
+    async getActiveLiveSession() {
+      const active = [...lives.values()].find((l) => l.session.state === "capturing");
+      if (!active) return null;
+      return { ...advance(active), windows: [...active.session.windows] };
+    },
     async getLiveSession(id) {
       const live = lives.get(id);
       if (!live) throw new ApiError("Live session not found", 404);
@@ -347,8 +352,8 @@ export function createDemoClient(): ApiClient {
       const windows = live.session.windows;
       if (!windows.length) throw new ApiError("Not enough complete windows to score this capture.", 422);
       return store(finalize(`demo-${++counter}`, live.session.capture_file, "live", windows, live.session.pending_window_index));
-       },
-        async startLiveAttack(_id, _mode) {
+    },
+    async startLiveAttack(_id, _mode) {
       throw new ApiError("Attack simulation is available only in backend API mode.", 501);
     },
     async stopLiveAttack(_id) {

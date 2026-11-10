@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRight, FileSearch, Radio, ShieldAlert } from "lucide-react";
 
@@ -8,9 +9,9 @@ import { EmptyState, ErrorState, fmtAgo, Panel } from "@/components/app/primitiv
 import { SystemChecks } from "@/components/app/SystemChecks";
 import { ThreatChart } from "@/components/app/ThreatChart";
 import { BusActivityWave, type WaveSource } from "@/components/app/BusActivityWave";
-import { useActiveLiveSessionId } from "@/lib/live-session-store";
+import { setActiveLiveSession, useActiveLiveSessionId } from "@/lib/live-session-store";
 import { useAuditLog } from "@/lib/audit-log";
-import { metricsOf, useAnalyses, useAnalysis, useLiveSession, useStatus } from "@/lib/api/queries";
+import { metricsOf, useActiveLiveSessionQuery, useAnalyses, useAnalysis, useLiveSession, useStatus } from "@/lib/api/queries";
 import { pageHead } from "@/lib/head";
 import { cn } from "@/lib/utils";
 
@@ -28,10 +29,43 @@ function Overview() {
   const alerts = log.filter((e) => e.level === "ALERT").slice(0, 5);
   const liveId = useActiveLiveSessionId();
   const live = useLiveSession(liveId, true);
-  const waveSource: WaveSource = live.data
-    ? { kind: "live", windows: live.data.windows, pendingWindowIndex: live.data.pending_window_index, dataSource: live.data.data_source, capturing: live.data.state === "capturing" }
+  const activeQuery = useActiveLiveSessionQuery(!liveId);
+
+  useEffect(() => {
+    if (activeQuery.data?.id && activeQuery.data.state === "capturing") {
+      setActiveLiveSession(activeQuery.data.id);
+    }
+  }, [activeQuery.data]);
+
+  useEffect(() => {
+    if (live.data && live.data.state === "stopped") {
+      setActiveLiveSession(null);
+    }
+  }, [live.data]);
+
+  const activeLiveData =
+    live.data && live.data.state === "capturing"
+      ? live.data
+      : activeQuery.data && activeQuery.data.state === "capturing"
+        ? activeQuery.data
+        : live.data;
+
+  const waveSource: WaveSource = activeLiveData
+    ? {
+        kind: "live",
+        windows: activeLiveData.windows,
+        pendingWindowIndex: activeLiveData.pending_window_index,
+        dataSource: activeLiveData.data_source,
+        capturing: activeLiveData.state === "capturing",
+      }
     : latest.data
-      ? { kind: "analysis", windows: latest.data.windows, excludedPartialWindow: latest.data.excluded_partial_window, dataSource: latest.data.data_source, label: latest.data.capture_file }
+      ? {
+          kind: "analysis",
+          windows: latest.data.windows,
+          excludedPartialWindow: latest.data.excluded_partial_window,
+          dataSource: latest.data.data_source,
+          label: latest.data.capture_file,
+        }
       : { kind: "idle" };
 
   return (

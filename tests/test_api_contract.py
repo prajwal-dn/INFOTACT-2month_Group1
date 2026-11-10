@@ -183,67 +183,84 @@ def test_live_session_flow_mock_direct(client):
     """Test live session start, event feeding, polling, and stopping."""
     from api_server import live_manager
 
-    # Start live capture
-    start_resp = client.post("/api/live/start")
-    assert start_resp.status_code == 200
-    session = start_resp.json()
-    sid = session["id"]
-    assert session["state"] == "capturing"
-    assert session["data_source"] == "backend"
+    # On Windows, build/can_sniffer is an ELF binary; mock sniffer path for direct feeding test
+    orig_sniffer = live_manager.sniffer_path
+    if os.name == "nt":
+        live_manager.sniffer_path = Path("mock_sniffer_disabled_on_windows")
 
-    # Concurrent start must fail with 409
-    dup_resp = client.post("/api/live/start")
-    assert dup_resp.status_code == 409
-    assert "in progress" in dup_resp.json()["detail"]
+    try:
+        # Start live capture
+        start_resp = client.post("/api/live/start")
+        assert start_resp.status_code == 200
+        session = start_resp.json()
+        sid = session["id"]
+        assert session["state"] == "capturing"
+        assert session["data_source"] == "backend"
 
-    # Poll live session
-    poll_resp = client.get(f"/api/live/{sid}")
-    assert poll_resp.status_code == 200
-    assert poll_resp.json()["id"] == sid
+        # Concurrent start must fail with 409
+        dup_resp = client.post("/api/live/start")
+        assert dup_resp.status_code == 409
+        assert "in progress" in dup_resp.json()["detail"]
 
-    # Feed events across 2 windows directly
-    base_ts = 1730000000_000000000
-    for w in range(2):
-        for f in range(10):
-            ts_str = f"2024-10-27T03:33:2{w}.{f:02d}0000000Z"
-            event = {
-                "schema_version": 1,
-                "event_type": "can_frame",
-                "timestamp_utc": ts_str,
-                "interface": "vcan0",
-                "can_id": "0x100",
-                "frame_format": "standard",
-                "flags": "none",
-                "dlc": 8,
-                "payload": "0102030405060708",
-            }
-            live_manager.feed_event_direct(event, sid)
+        # Poll live session
+        poll_resp = client.get(f"/api/live/{sid}")
+        assert poll_resp.status_code == 200
+        assert poll_resp.json()["id"] == sid
 
-    # Trigger window transition with a 3rd window event
-    live_manager.feed_event_direct({
-        "schema_version": 1,
-        "event_type": "can_frame",
-        "timestamp_utc": "2024-10-27T03:33:23.000000000Z",
-        "interface": "vcan0",
-        "can_id": "0x100",
-        "frame_format": "standard",
-        "flags": "none",
-        "dlc": 8,
-        "payload": "0102030405060708",
-    }, sid)
+        active_resp = client.get("/api/live/active")
+        assert active_resp.status_code == 200
+        assert active_resp.json()["id"] == sid
+        assert active_resp.json()["state"] == "capturing"
 
-    poll2 = client.get(f"/api/live/{sid}")
-    assert poll2.status_code == 200
-    assert len(poll2.json()["windows"]) >= 1
+        # Feed events across 2 windows directly
+        base_ts = 1730000000_000000000
+        for w in range(2):
+            for f in range(10):
+                ts_str = f"2024-10-27T03:33:2{w}.{f:02d}0000000Z"
+                event = {
+                    "schema_version": 1,
+                    "event_type": "can_frame",
+                    "timestamp_utc": ts_str,
+                    "interface": "vcan0",
+                    "can_id": "0x100",
+                    "frame_format": "standard",
+                    "flags": "none",
+                    "dlc": 8,
+                    "payload": "0102030405060708",
+                }
+                live_manager.feed_event_direct(event, sid)
 
-    # Stop live capture
-    stop_resp = client.post(f"/api/live/{sid}/stop")
-    assert stop_resp.status_code == 200
-    final_res = stop_resp.json()
-    assert final_res["origin"] == "live"
-    assert final_res["data_source"] == "backend"
-    assert "windows" in final_res
-    assert "frequency_summary" in final_res
+        # Trigger window transition with a 3rd window event
+        live_manager.feed_event_direct({
+            "schema_version": 1,
+            "event_type": "can_frame",
+            "timestamp_utc": "2024-10-27T03:33:23.000000000Z",
+            "interface": "vcan0",
+            "can_id": "0x100",
+            "frame_format": "standard",
+            "flags": "none",
+            "dlc": 8,
+            "payload": "0102030405060708",
+        }, sid)
+
+        poll2 = client.get(f"/api/live/{sid}")
+        assert poll2.status_code == 200
+        assert len(poll2.json()["windows"]) >= 1
+
+        # Stop live capture
+        stop_resp = client.post(f"/api/live/{sid}/stop")
+        assert stop_resp.status_code == 200
+        final_res = stop_resp.json()
+        assert final_res["origin"] == "live"
+        assert final_res["data_source"] == "backend"
+        assert "windows" in final_res
+        assert "frequency_summary" in final_res
+
+        # After stopping, /api/live/active must return 404
+        active_after_stop = client.get("/api/live/active")
+        assert active_after_stop.status_code == 404
+    finally:
+        live_manager.sniffer_path = orig_sniffer
 
 
 def test_analysis_includes_incident_list(client):

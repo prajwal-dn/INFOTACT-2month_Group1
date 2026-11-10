@@ -37,8 +37,9 @@ import { logEvent } from "@/lib/audit-log";
 import { liveAnomalyMessage, liveStartMessage, liveStopMessage } from "@/lib/audit-messages";
 import { useBackendConfig } from "@/lib/api";
 import { BusActivityWave } from "@/components/app/BusActivityWave";
-import { setActiveLiveSession } from "@/lib/live-session-store";
+import { getActiveLiveSessionId, setActiveLiveSession } from "@/lib/live-session-store";
 import {
+  useActiveLiveSessionQuery,
   useAllIncidents,
   useLiveSession,
   useStartLive,
@@ -73,9 +74,13 @@ function LiveMonitor() {
   const demo = mode === "demo";
   const navigate = useNavigate();
   const status = useStatus();
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(() => getActiveLiveSessionId());
   const start = useStartLive();
   const stop = useStopLive();
+  // Always query the backend for an active session on mount — this recovers
+  // from stale localStorage IDs and from navigation-away-and-back.
+  // Disabled only while a stop mutation is in-flight to avoid re-latching.
+  const activeQuery = useActiveLiveSessionQuery(!stop.isPending);
   const attack = useStartLiveAttack();
   const stopAttack = useStopLiveAttack();
   const startNormal = useStartLiveNormal();
@@ -83,7 +88,12 @@ function LiveMonitor() {
   const stopSimulations = useStopLiveSimulations();
   const [attackMode, setAttackMode] = useState<1 | 2>(1);
   const session = useLiveSession(sessionId, !stop.isPending);
-  const s = session.data;
+  const s =
+    session.data && session.data.state === "capturing"
+      ? session.data
+      : activeQuery.data && activeQuery.data.state === "capturing"
+        ? activeQuery.data
+        : session.data;
   const capturing = s?.state === "capturing";
   const seen = useRef(new Set<number>());
 
@@ -97,10 +107,29 @@ function LiveMonitor() {
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const allIncidents = useAllIncidents();
 
-  useEffect(
-    () => setActiveLiveSession(capturing && sessionId ? sessionId : null),
-    [capturing, sessionId],
-  );
+  // Restore active session discovered from backend if store was empty OR had a stale ID
+  useEffect(() => {
+    const backendId = activeQuery.data?.id;
+    const backendState = activeQuery.data?.state;
+    if (backendId && backendState === "capturing" && backendId !== sessionId) {
+      setSessionId(backendId);
+      setActiveLiveSession(backendId);
+    }
+  }, [sessionId, activeQuery.data]);
+
+  // Synchronize active session with store and cleanup when stopped or invalid.
+  // Guard: don't wipe session while activeQuery is in-flight or if backend has an active session.
+  useEffect(() => {
+    const backendIsActive = activeQuery.data?.state === "capturing";
+    const backendConfirmedNoSession = activeQuery.isFetched && !activeQuery.data;
+    if ((s && s.state === "stopped") || (session.isError && backendConfirmedNoSession)) {
+      setActiveLiveSession(null);
+      setSessionId(null);
+    } else if (capturing && s?.id) {
+      setActiveLiveSession(s.id);
+    }
+  }, [session.isError, s, capturing, activeQuery.data, activeQuery.isFetched]);
+
   const ready = checksFor(status.data).every((c) => c.ok || c.demo);
 
   // Monitor windows for anomaly toasts
@@ -164,7 +193,8 @@ function LiveMonitor() {
     navigate({ to: "/analyses/$analysisId", params: { analysisId } });
   };
 
-  const onStart = () =>
+  const onStart = () => {
+    if (capturing) return;
     start.mutate(undefined, {
       onSuccess: (live) => {
         seen.current.clear();
@@ -172,6 +202,7 @@ function LiveMonitor() {
         setActiveIncident(null);
         setIsAlertModalOpen(false);
         setSessionId(live.id);
+        setActiveLiveSession(live.id);
         const demo = live.data_source === "demo";
         logEvent(
           "INFO",
@@ -182,6 +213,7 @@ function LiveMonitor() {
       },
       onError: (e) => toast.error("Capture failed to start", { description: e.message }),
     });
+  };
 
   const isNormalRunning = s?.normal?.state === "RUNNING";
   const isAttackRunning = s?.attack?.state === "RUNNING";
@@ -246,6 +278,7 @@ function LiveMonitor() {
           demo,
           `analysis:${a.id}`,
         );
+        setActiveLiveSession(null);
         setSessionId(null);
         navigate({ to: "/analyses/$analysisId", params: { analysisId: a.id } });
       },
@@ -278,8 +311,18 @@ function LiveMonitor() {
               analyze
             </Button>
           ) : (
-            <Button variant="live" size="lg" onClick={onStart} disabled={start.isPending || !ready}>
-              {start.isPending ? <Loader2 className="animate-spin" /> : <Radio />} Start capture
+            <Button
+              variant="live"
+              size="lg"
+              onClick={onStart}
+              disabled={start.isPending || !ready || (sessionId !== null && !session.isError)}
+            >
+              {start.isPending || (sessionId !== null && session.isLoading) ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <Radio />
+              )}{" "}
+              Start capture
             </Button>
           )
         }
@@ -303,264 +346,273 @@ function LiveMonitor() {
         />
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(300px,360px)_minmax(0,1fr)]">
-        <div className="space-y-6">
-          <Panel title="Pre-flight checks">
-            {status.isError ? (
-              <ErrorState error={status.error} />
-            ) : (
-              <SystemChecks status={status.data} />
-            )}
-            {!ready && status.data && (
-              <p className="mt-3 text-xs text-muted-foreground">
-                Bring vcan0 up on the backend host:
-                <code className="mt-1 block rounded-md bg-secondary p-2 font-mono text-[0.68rem] text-foreground">
-                  sudo modprobe vcan{"\n"}sudo ip link add dev vcan0 type vcan{"\n"}sudo ip link set
-                  up vcan0
-                </code>
-              </p>
-            )}
-          </Panel>
-          <Panel title="Session">
-            {s ? (
-              <dl className="space-y-2 font-mono text-xs">
-                <Row
-                  k="state"
-                  v={
-                    <span className={cn(capturing ? "text-warning" : "text-muted-foreground")}>
-                      {s.state}
-                    </span>
-                  }
-                />
-                <Row k="elapsed" v={elapsed(s.started_at)} />
-                <Row k="frames" v={s.frames_captured.toLocaleString()} />
-                <Row k="pending window" v={s.pending_window_index ?? "—"} />
-                <Row k="file" v={<span className="break-all">{s.capture_file}</span>} />
-              </dl>
-            ) : (
-              <p className="text-sm text-muted-foreground">No capture running.</p>
-            )}
-            {demo && (
-              <p className="mt-3 rounded-lg border border-demo/30 bg-demo/10 p-2.5 text-[0.7rem] leading-relaxed text-demo">
-                Demo follows a scripted timeline with two illustrative anomaly bursts. Nothing is
-                captured.
-              </p>
-            )}
-          </Panel>
-          {!demo && capturing && s?.interface === "vcan0" && (
-            <Panel
-              title="Traffic Simulation Control"
-              aside={<span className="text-xs text-muted-foreground">vcan0 only</span>}
-            >
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                Run legitimate and malicious CAN generators simultaneously. Automated response
-                terminates only the malicious simulator process while normal traffic flows
-                continuously.
-              </p>
+      {/* Session, Pre-flight checks & Simulation Controls */}
+      <div
+        className={cn(
+          "grid gap-6",
+          !demo && capturing && s?.interface === "vcan0"
+            ? "grid-cols-1 md:grid-cols-2 xl:grid-cols-3"
+            : "grid-cols-1 md:grid-cols-2",
+        )}
+      >
+        <Panel title="Pre-flight checks">
+          {status.isError ? (
+            <ErrorState error={status.error} />
+          ) : (
+            <SystemChecks status={status.data} />
+          )}
+          {!ready && status.data && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Bring vcan0 up on the backend host:
+              <code className="mt-1 block rounded-md bg-secondary p-2 font-mono text-[0.68rem] text-foreground">
+                sudo modprobe vcan{"\n"}sudo ip link add dev vcan0 type vcan{"\n"}sudo ip link set
+                up vcan0
+              </code>
+            </p>
+          )}
+        </Panel>
+        <Panel title="Session">
+          {s ? (
+            <dl className="space-y-2 font-mono text-xs">
+              <Row
+                k="state"
+                v={
+                  <span className={cn(capturing ? "text-warning" : "text-muted-foreground")}>
+                    {s.state}
+                  </span>
+                }
+              />
+              <Row k="elapsed" v={elapsed(s.started_at)} />
+              <Row k="frames" v={s.frames_captured.toLocaleString()} />
+              <Row k="pending window" v={s.pending_window_index ?? "—"} />
+              <Row k="file" v={<span className="break-all">{s.capture_file}</span>} />
+            </dl>
+          ) : (
+            <p className="text-sm text-muted-foreground">No capture running.</p>
+          )}
+          {demo && (
+            <p className="mt-3 rounded-lg border border-demo/30 bg-demo/10 p-2.5 text-[0.7rem] leading-relaxed text-demo">
+              Demo follows a scripted timeline with two illustrative anomaly bursts. Nothing is
+              captured.
+            </p>
+          )}
+        </Panel>
+        {!demo && capturing && s?.interface === "vcan0" && (
+          <Panel
+            title="Traffic Simulation Control"
+            aside={<span className="text-xs text-muted-foreground">vcan0 only</span>}
+            className="md:col-span-2 xl:col-span-1"
+          >
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Run legitimate and malicious CAN generators simultaneously. Automated response
+              terminates only the malicious simulator process while normal traffic flows
+              continuously.
+            </p>
 
-              {/* Normal Traffic Controls */}
-              <div className="mt-4 rounded-lg border border-border/60 bg-secondary/30 p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                    <Activity className="size-3.5 text-emerald-500" /> Normal Traffic
-                  </span>
-                  <span
-                    className={cn(
-                      "text-[0.68rem] font-mono font-semibold px-1.5 py-0.5 rounded border",
-                      isNormalRunning
-                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
-                        : "border-border/60 bg-secondary/60 text-muted-foreground",
-                    )}
-                  >
-                    {isNormalRunning
-                      ? `RUNNING (PID ${s?.normal?.pid ?? "—"})`
-                      : (s?.normal?.state ?? "NOT_STARTED")}
-                  </span>
-                </div>
-                <p className="text-[0.7rem] text-muted-foreground mb-3">
-                  Transmits RPM (0x100), Speed (0x101), and Coolant (0x102) frames.
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    variant={isNormalRunning ? "secondary" : "default"}
-                    onClick={onStartNormal}
-                    disabled={startNormal.isPending || isNormalRunning || !capturing}
-                  >
-                    {startNormal.isPending ? (
-                      <Loader2 className="animate-spin" />
-                    ) : (
-                      <Play className="size-3.5" />
-                    )}{" "}
-                    Start Normal Traffic
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={onStopNormal}
-                    disabled={stopNormal.isPending || !isNormalRunning}
-                  >
-                    {stopNormal.isPending ? (
-                      <Loader2 className="animate-spin" />
-                    ) : (
-                      <Square className="size-3.5" />
-                    )}{" "}
-                    Stop Normal Traffic
-                  </Button>
-                </div>
+            {/* Normal Traffic Controls */}
+            <div className="mt-4 rounded-lg border border-border/60 bg-secondary/30 p-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                  <Activity className="size-3.5 text-emerald-500" /> Normal Traffic
+                </span>
+                <span
+                  className={cn(
+                    "text-[0.68rem] font-mono font-semibold px-1.5 py-0.5 rounded border",
+                    isNormalRunning
+                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                      : "border-border/60 bg-secondary/60 text-muted-foreground",
+                  )}
+                >
+                  {isNormalRunning
+                    ? `RUNNING (PID ${s?.normal?.pid ?? "—"})`
+                    : (s?.normal?.state ?? "NOT_STARTED")}
+                </span>
               </div>
-
-              {/* Malicious Attack Controls */}
-              <div className="mt-3 rounded-lg border border-border/60 bg-secondary/30 p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                    <Zap className="size-3.5 text-amber-500" /> Attack Simulator
-                  </span>
-                  <span
-                    className={cn(
-                      "text-[0.68rem] font-mono font-semibold px-1.5 py-0.5 rounded border",
-                      isAttackRunning
-                        ? "border-destructive/30 bg-destructive/10 text-destructive animate-pulse"
-                        : "border-border/60 bg-secondary/60 text-muted-foreground",
-                    )}
-                  >
-                    {isAttackRunning
-                      ? `RUNNING (Mode ${s?.attack?.mode ?? attackMode})`
-                      : (s?.attack?.state ?? "NOT_STARTED")}
-                  </span>
-                </div>
-                <div className="mb-2 flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    variant={attackMode === 1 ? "default" : "outline"}
-                    onClick={() => setAttackMode(1)}
-                    disabled={attack.isPending || isAttackRunning}
-                  >
-                    Mode 1 · Flood
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant={attackMode === 2 ? "default" : "outline"}
-                    onClick={() => setAttackMode(2)}
-                    disabled={attack.isPending || isAttackRunning}
-                  >
-                    Mode 2 · Extended ID
-                  </Button>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    onClick={onStartAttack}
-                    disabled={
-                      attack.isPending ||
-                      isAttackRunning ||
-                      s?.recovery?.state === "ATTACK_STOPPED_VERIFYING"
-                    }
-                  >
-                    {attack.isPending ? (
-                      <Loader2 className="animate-spin" />
-                    ) : (
-                      <Zap className="size-3.5" />
-                    )}{" "}
-                    Start Attack Traffic
-                  </Button>
-                </div>
-              </div>
-
-              {/* Global Simulation Stop */}
-              <div className="mt-3">
+              <p className="text-[0.7rem] text-muted-foreground mb-3">
+                Transmits RPM (0x100), Speed (0x101), and Coolant (0x102) frames.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant={isNormalRunning ? "secondary" : "default"}
+                  onClick={onStartNormal}
+                  disabled={startNormal.isPending || isNormalRunning || !capturing}
+                >
+                  {startNormal.isPending ? (
+                    <Loader2 className="animate-spin" />
+                  ) : (
+                    <Play className="size-3.5" />
+                  )}{" "}
+                  Start Normal Traffic
+                </Button>
                 <Button
                   size="sm"
                   variant="outline"
-                  className="w-full text-xs text-muted-foreground hover:text-destructive"
-                  onClick={onStopAllSimulations}
-                  disabled={stopSimulations.isPending || (!isNormalRunning && !isAttackRunning)}
+                  onClick={onStopNormal}
+                  disabled={stopNormal.isPending || !isNormalRunning}
                 >
-                  {stopSimulations.isPending ? (
+                  {stopNormal.isPending ? (
                     <Loader2 className="animate-spin" />
                   ) : (
-                    <AlertOctagon className="size-3.5" />
+                    <Square className="size-3.5" />
                   )}{" "}
-                  Stop All Simulations
+                  Stop Normal Traffic
                 </Button>
               </div>
+            </div>
 
-              {/* Telemetry and Recovery Status */}
-              <dl className="mt-3 space-y-2 font-mono text-xs border-t border-border/40 pt-3">
-                <Row
-                  k="normal generator"
-                  v={
-                    <span
-                      className={cn(
-                        isNormalRunning
-                          ? "text-emerald-500 font-semibold"
-                          : "text-muted-foreground",
-                      )}
-                    >
-                      {isNormalRunning
-                        ? `ACTIVE (PID ${s?.normal?.pid ?? "—"})`
-                        : (s?.normal?.state ?? "NOT_STARTED")}
-                    </span>
+            {/* Malicious Attack Controls */}
+            <div className="mt-3 rounded-lg border border-border/60 bg-secondary/30 p-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                  <Zap className="size-3.5 text-amber-500" /> Attack Simulator
+                </span>
+                <span
+                  className={cn(
+                    "text-[0.68rem] font-mono font-semibold px-1.5 py-0.5 rounded border",
+                    isAttackRunning
+                      ? "border-destructive/30 bg-destructive/10 text-destructive animate-pulse"
+                      : "border-border/60 bg-secondary/60 text-muted-foreground",
+                  )}
+                >
+                  {isAttackRunning
+                    ? `RUNNING (Mode ${s?.attack?.mode ?? attackMode})`
+                    : (s?.attack?.state ?? "NOT_STARTED")}
+                </span>
+              </div>
+              <div className="mb-2 flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant={attackMode === 1 ? "default" : "outline"}
+                  onClick={() => setAttackMode(1)}
+                  disabled={attack.isPending || isAttackRunning}
+                >
+                  Mode 1 · Flood
+                </Button>
+                <Button
+                  size="sm"
+                  variant={attackMode === 2 ? "default" : "outline"}
+                  onClick={() => setAttackMode(2)}
+                  disabled={attack.isPending || isAttackRunning}
+                >
+                  Mode 2 · Extended ID
+                </Button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={onStartAttack}
+                  disabled={
+                    attack.isPending ||
+                    isAttackRunning ||
+                    s?.recovery?.state === "ATTACK_STOPPED_VERIFYING"
                   }
-                />
-                <Row
-                  k="attack simulator"
-                  v={
-                    <span
-                      className={cn(
-                        isAttackRunning
-                          ? "text-destructive font-semibold"
-                          : "text-muted-foreground",
-                      )}
-                    >
-                      {isAttackRunning
-                        ? `ACTIVE (Mode ${s?.attack?.mode ?? attackMode})`
-                        : (s?.attack?.state ?? "NOT_STARTED")}
-                    </span>
-                  }
-                />
-                <Row
-                  k="concurrent state"
-                  v={
-                    isNormalRunning && isAttackRunning ? (
-                      <span className="text-amber-400 font-semibold">
-                        CONCURRENT (Normal + Attack)
-                      </span>
-                    ) : isNormalRunning ? (
-                      <span className="text-emerald-400">Normal Only</span>
-                    ) : isAttackRunning ? (
-                      <span className="text-destructive">Attack Only</span>
-                    ) : (
-                      <span className="text-muted-foreground">Idle</span>
-                    )
-                  }
-                />
-                <Row k="recovery state" v={s?.recovery?.state ?? "NOT_STARTED"} />
-                <Row
-                  k="normal windows"
-                  v={`${s?.recovery?.normal_windows ?? 0} / ${s?.recovery?.required_normal_windows ?? 2}`}
-                />
-              </dl>
-              {s?.recovery?.state === "RECOVERED" && (
-                <p className="mt-3 text-xs text-success">
-                  {s.recovery.required_normal_windows ?? 2} consecutive normal model windows
-                  observed after the simulator stopped. Legitimate traffic was maintained throughout
-                  recovery.
-                </p>
-              )}
-              {s?.recovery?.state === "ATTACK_STOPPED_VERIFYING" && (
-                <p className="mt-3 text-xs text-warning">
-                  Attack simulator stopped automatically. Waiting for{" "}
-                  {s.recovery.required_normal_windows ?? 2} consecutive normal windows while
-                  legitimate traffic flows…
-                </p>
-              )}
-            </Panel>
-          )}
-        </div>
+                >
+                  {attack.isPending ? (
+                    <Loader2 className="animate-spin" />
+                  ) : (
+                    <Zap className="size-3.5" />
+                  )}{" "}
+                  Start Attack Traffic
+                </Button>
+              </div>
+            </div>
 
-        <div className="min-w-0 space-y-6">
+            {/* Global Simulation Stop */}
+            <div className="mt-3">
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-full text-xs text-muted-foreground hover:text-destructive"
+                onClick={onStopAllSimulations}
+                disabled={stopSimulations.isPending || (!isNormalRunning && !isAttackRunning)}
+              >
+                {stopSimulations.isPending ? (
+                  <Loader2 className="animate-spin" />
+                ) : (
+                  <AlertOctagon className="size-3.5" />
+                )}{" "}
+                Stop All Simulations
+              </Button>
+            </div>
+
+            {/* Telemetry and Recovery Status */}
+            <dl className="mt-3 space-y-2 font-mono text-xs border-t border-border/40 pt-3">
+              <Row
+                k="normal generator"
+                v={
+                  <span
+                    className={cn(
+                      isNormalRunning
+                        ? "text-emerald-500 font-semibold"
+                        : "text-muted-foreground",
+                    )}
+                  >
+                    {isNormalRunning
+                      ? `ACTIVE (PID ${s?.normal?.pid ?? "—"})`
+                      : (s?.normal?.state ?? "NOT_STARTED")}
+                  </span>
+                }
+              />
+              <Row
+                k="attack simulator"
+                v={
+                  <span
+                    className={cn(
+                      isAttackRunning
+                        ? "text-destructive font-semibold"
+                        : "text-muted-foreground",
+                    )}
+                  >
+                    {isAttackRunning
+                      ? `ACTIVE (Mode ${s?.attack?.mode ?? attackMode})`
+                      : (s?.attack?.state ?? "NOT_STARTED")}
+                  </span>
+                }
+              />
+              <Row
+                k="concurrent state"
+                v={
+                  isNormalRunning && isAttackRunning ? (
+                    <span className="text-amber-400 font-semibold">
+                      CONCURRENT (Normal + Attack)
+                    </span>
+                  ) : isNormalRunning ? (
+                    <span className="text-emerald-400">Normal Only</span>
+                  ) : isAttackRunning ? (
+                    <span className="text-destructive">Attack Only</span>
+                  ) : (
+                    <span className="text-muted-foreground">Idle</span>
+                  )
+                }
+              />
+              <Row k="recovery state" v={s?.recovery?.state ?? "NOT_STARTED"} />
+              <Row
+                k="normal windows"
+                v={`${s?.recovery?.normal_windows ?? 0} / ${s?.recovery?.required_normal_windows ?? 2}`}
+              />
+            </dl>
+            {s?.recovery?.state === "RECOVERED" && (
+              <p className="mt-3 text-xs text-success">
+                {s.recovery.required_normal_windows ?? 2} consecutive normal model windows
+                observed after the simulator stopped. Legitimate traffic was maintained throughout
+                recovery.
+              </p>
+            )}
+            {s?.recovery?.state === "ATTACK_STOPPED_VERIFYING" && (
+              <p className="mt-3 text-xs text-warning">
+                Attack simulator stopped automatically. Waiting for{" "}
+                {s.recovery.required_normal_windows ?? 2} consecutive normal windows while
+                legitimate traffic flows…
+              </p>
+            )}
+          </Panel>
+        )}
+      </div>
+
+      {/* Main Monitoring Dashboard — occupies full available horizontal width */}
+      <div className="w-full space-y-6">
           {/* Phase 6: Threat Monitoring Panel */}
           <ThreatMonitoringPanel
             windows={windows}
@@ -679,20 +731,26 @@ function LiveMonitor() {
 
           {session.isError && <ErrorState error={session.error} />}
 
-          {s && (
-            <BusActivityWave
-              source={{
-                kind: "live",
-                windows,
-                pendingWindowIndex: s.pending_window_index,
-                dataSource: s.data_source,
-                capturing,
-              }}
-              height={120}
-            />
-          )}
-
-          <Panel title="Threat score" aside={<DemoBadge source={s?.data_source} />}>
+          {/* Combined CAN Bus Activity wave + Threat score analysis panel with clear subheaders */}
+          <Panel title="CAN Bus Activity & Threat Analysis" aside={<DemoBadge source={s?.data_source} />}>
+            {s && (
+              <div className="-mx-5 -mt-2 mb-4 border-b border-border/40 pb-3">
+                <BusActivityWave
+                  className="rounded-none border-0 bg-transparent"
+                  source={{
+                    kind: "live",
+                    windows,
+                    pendingWindowIndex: s.pending_window_index,
+                    dataSource: s.data_source,
+                    capturing,
+                  }}
+                  height={120}
+                />
+              </div>
+            )}
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Threat Score Over Time (Isolation Forest)
+            </div>
             {windows.length ? (
               <ThreatChart windows={windows} height={260} />
             ) : (
@@ -743,28 +801,27 @@ function LiveMonitor() {
             />
           </Panel>
         </div>
+
+        <SecurityAlertModal
+          incident={activeIncident}
+          session={s ?? null}
+          isOpen={isAlertModalOpen}
+          onClose={handleCloseAlertModal}
+          onOpenAnalysis={handleOpenAnalysis}
+          onOpenReport={(inc) => {
+            setSelectedReportIncident(inc);
+            setIsReportModalOpen(true);
+          }}
+        />
+
+        <IncidentReportModal
+          incident={selectedReportIncident}
+          isOpen={isReportModalOpen}
+          onClose={() => setIsReportModalOpen(false)}
+        />
       </div>
-
-      <SecurityAlertModal
-        incident={activeIncident}
-        session={s ?? null}
-        isOpen={isAlertModalOpen}
-        onClose={handleCloseAlertModal}
-        onOpenAnalysis={handleOpenAnalysis}
-        onOpenReport={(inc) => {
-          setSelectedReportIncident(inc);
-          setIsReportModalOpen(true);
-        }}
-      />
-
-      <IncidentReportModal
-        incident={selectedReportIncident}
-        isOpen={isReportModalOpen}
-        onClose={() => setIsReportModalOpen(false)}
-      />
-    </div>
-  );
-}
+    );
+  }
 
 function Row({ k, v }: { k: string; v: React.ReactNode }) {
   return (

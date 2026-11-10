@@ -167,9 +167,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           </nav>
           <DemoBanner />
         </header>
-        <main className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-8 md:px-8">{children}</main>
+        <main className="w-full flex-1 px-4 py-8 md:px-8">{children}</main>
         <footer className="border-t px-4 py-4 text-xs text-muted-foreground md:px-8">
-          <div className="mx-auto flex max-w-[1400px] flex-wrap justify-between gap-2">
+          <div className="flex w-full flex-wrap justify-between gap-2">
             <span>Prototype · Virtual-CAN captures only · Model accuracy is not independently validated</span>
             <span className="font-mono">CAN-Sentinel web · Isolation Forest · vcan0-only</span>
           </div>
