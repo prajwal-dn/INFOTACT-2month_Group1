@@ -1,0 +1,2 @@
+can_id,frame_format,frame_count,percentage_of_total,unique_payload_count,mean_interarrival_ms,median_interarrival_ms,min_interarrival_ms,max_interarrival_ms
+0x100,standard,18832,100.0,1,2.346174,2.031593,0.00807,2017.801966

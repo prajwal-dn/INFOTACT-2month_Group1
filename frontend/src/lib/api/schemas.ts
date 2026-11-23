@@ -1,0 +1,399 @@
+// Data models shared with the Python backend (future FastAPI service).
+// Field names mirror the backend's CSV/report columns (score_capture.py,
+// frequency_analyzer.py) so the API can serialise them without renaming.
+import { z } from "zod";
+
+export const FEATURE_COLUMNS = [
+  "total_frames",
+  "unique_can_ids",
+  "extended_frame_count",
+  "unique_payload_count",
+  "max_id_share_pct",
+  "id_0x100_count",
+  "id_0x100_share_pct",
+  "id_0x101_count",
+  "id_0x101_share_pct",
+  "id_0x102_count",
+  "id_0x102_share_pct",
+  "id_0x999_count",
+  "id_0x999_share_pct",
+  "other_id_count",
+] as const;
+
+export type FeatureColumn = (typeof FEATURE_COLUMNS)[number];
+
+export const DataSource = z.enum(["demo", "backend"]);
+export type DataSource = z.infer<typeof DataSource>;
+
+export const Prediction = z.enum(["NORMAL", "ANOMALY"]);
+export type Prediction = z.infer<typeof Prediction>;
+
+export const WindowFeatures = z.object(
+  Object.fromEntries(FEATURE_COLUMNS.map((c) => [c, z.number()])) as Record<FeatureColumn, z.ZodNumber>,
+);
+export type WindowFeatures = z.infer<typeof WindowFeatures>;
+
+/** Evidence-based explanation attached to an anomalous window. */
+export const AlertReason = z.object({
+  code: z.string(),
+  message: z.string(),
+  evidence: z.record(z.string(), z.unknown()),
+});
+
+export const AlertExplanation = z.object({
+  reasons: z.array(AlertReason),
+  severity: z.enum(["INFO", "MEDIUM", "HIGH", "REVIEW"]),
+  summary: z.string(),
+});
+
+export type AlertReason = z.infer<typeof AlertReason>;
+export type AlertExplanation = z.infer<typeof AlertExplanation>;
+
+/** One scored 1-second window (a row of reports/<capture>_inference.csv). */
+export const ResponseEvidence = z.object({
+  can_id_counts: z.record(z.string(), z.number().int()),
+  unexpected_can_ids: z.array(z.string()),
+  dominant_can_id: z.string().nullable(),
+  dominant_can_id_share_pct: z.number(),
+});
+
+export const InferenceWindow = z.object({
+  window_index: z.number().int(),
+  window_start_utc: z.string(),
+  prediction: Prediction,
+  anomaly_score: z.number(),
+  features: WindowFeatures,
+  explanation: AlertExplanation.optional(),
+  response_evidence: ResponseEvidence.optional(),
+});
+export type InferenceWindow = z.infer<typeof InferenceWindow>;
+/** A group of correlated anomalous CAN windows. */
+export const Incident = z.object({
+  incident_id: z.string(),
+  severity: z.enum(["HIGH", "MEDIUM", "REVIEW"]),
+  status: z.string(),
+  start_window: z.number().int(),
+  end_window: z.number().int(),
+  window_count: z.number().int(),
+  start_time_utc: z.string(),
+  end_time_utc: z.string(),
+  affected_can_ids: z.array(z.string()),
+  response_evidence: ResponseEvidence.optional(),
+  reasons: z.array(AlertReason),
+  windows: z.array(InferenceWindow),
+  summary: z.string(),
+});
+
+export type Incident = z.infer<typeof Incident>;
+
+export const ResponsePlan = z.object({
+  incident_id: z.string(),
+  classification: z.string(),
+  action: z.enum([
+    "SIMULATED_RATE_LIMIT",
+    "SIMULATED_ID_QUARANTINE",
+    "MANUAL_REVIEW",
+  ]),
+  description: z.string(),
+  target_can_ids: z.array(z.string()),
+  status: z.string(),
+  mode: z.literal("SIMULATION"),
+});
+
+export type ResponsePlan = z.infer<typeof ResponsePlan>;
+
+export const ReplayResult = z.object({
+  mode: z.literal("OFFLINE_SIMULATION"),
+  action: z.string(),
+  before: z.object({
+    total_frames: z.number(),
+    frames_by_can_id: z.record(z.string(), z.number()),
+    unique_can_ids: z.number(),
+  }),
+  after: z.object({
+    total_frames: z.number(),
+    frames_by_can_id: z.record(z.string(), z.number()),
+    unique_can_ids: z.number(),
+  }),
+  removed_frames: z.number(),
+  removed_can_ids: z.record(z.string(), z.number()),
+  original_preserved: z.boolean(),
+});
+
+export type ReplayResult = z.infer<typeof ReplayResult>;
+
+export const ResponseActivation = z.object({
+  incident_id: z.string(),
+  classification: z.string(),
+  action: z.string(),
+  description: z.string(),
+  target_can_ids: z.array(z.string()),
+  status: z.string(),
+  mode: z.literal("SIMULATION"),
+  replay_result: ReplayResult.optional(),
+});
+
+export type ResponseActivation = z.infer<typeof ResponseActivation>;
+export const RecoveryVerification = ResponseActivation.extend({
+  recovery: z.object({
+    verified: z.boolean(),
+    baseline_frame_rate: z.number(),
+    post_mitigation_frame_rate: z.number(),
+    remaining_unexpected_ids: z.number().int(),
+  }),
+});
+
+export type RecoveryVerification = z.infer<typeof RecoveryVerification>;
+/** Per-ID row from frequency_analyzer.build_frequency_summary. */
+export const FrequencyRow = z.object({
+  can_id: z.string(),
+  frame_format: z.string(),
+  frame_count: z.number(),
+  percentage_of_total: z.number(),
+  unique_payload_count: z.number(),
+  mean_interarrival_ms: z.number().nullable(),
+  median_interarrival_ms: z.number().nullable(),
+  min_interarrival_ms: z.number().nullable(),
+  max_interarrival_ms: z.number().nullable(),
+});
+export type FrequencyRow = z.infer<typeof FrequencyRow>;
+
+export const ModelInfo = z.object({
+  loaded: z.boolean(),
+  path: z.string(),
+  algorithm: z.string(),
+  contamination: z.number().nullable(),
+  training_windows: z.number().nullable(),
+  window_ms: z.number(),
+  feature_columns: z.array(z.string()),
+  sklearn_version: z.string().nullable(),
+});
+export type ModelInfo = z.infer<typeof ModelInfo>;
+
+export const SystemStatus = z.object({
+  data_source: DataSource,
+  backend_version: z.string(),
+  interface: z.object({
+    name: z.string(),
+    state: z.enum(["UP", "DOWN", "MISSING", "UNKNOWN"]),
+  }),
+  sniffer: z.object({ built: z.boolean(), path: z.string() }),
+  model: ModelInfo,
+  checked_at: z.string(),
+});
+export type SystemStatus = z.infer<typeof SystemStatus>;
+
+export const CapturePreset = z.object({
+  id: z.string(),
+  label: z.string(),
+  path: z.string(),
+  available: z.boolean(),
+});
+export type CapturePreset = z.infer<typeof CapturePreset>;
+
+export const AnalysisOrigin = z.enum(["preset", "path", "upload", "live"]);
+
+export const AnalysisSummary = z.object({
+  id: z.string(),
+  data_source: DataSource,
+  capture_file: z.string(),
+  origin: AnalysisOrigin,
+  created_at: z.string(),
+  frames_loaded: z.number(),
+  windows_scored: z.number(),
+  normal_count: z.number(),
+  anomaly_count: z.number(),
+});
+export type AnalysisSummary = z.infer<typeof AnalysisSummary>;
+
+export const AnalysisResult = AnalysisSummary.extend({
+  /** Index of the possibly-incomplete final window the backend excluded. */
+  excluded_partial_window: z.number().nullable(),
+  model: ModelInfo,
+  windows: z.array(InferenceWindow),
+  incidents: z.array(Incident).optional(),
+  frequency_summary: z.array(FrequencyRow),
+  notes: z.array(z.string()),
+});
+export type AnalysisResult = z.infer<typeof AnalysisResult>;
+
+export const LiveState = z.enum(["capturing", "stopping", "stopped", "error"]);
+export type LiveState = z.infer<typeof LiveState>;
+
+export const LiveAttack = z.object({
+  state: z.string(),
+  mode: z.number().optional(),
+  pid: z.number().optional(),
+  return_code: z.number().nullable().optional(),
+});
+export const LiveNormal = z.object({
+  state: z.string(),
+  pid: z.number().optional(),
+  return_code: z.number().nullable().optional(),
+  interval_ms: z.number().optional(),
+});
+export type LiveNormal = z.infer<typeof LiveNormal>;
+export const LiveRecovery = z.object({
+  state: z.string(),
+  normal_windows: z.number().optional(),
+  required_normal_windows: z.number().optional(),
+  stopped_after_window_index: z.number().nullable().optional(),
+});
+export const LiveAttackResult = z.object({
+  mode: z.number(),
+  pid: z.number(),
+  state: z.string(),
+});
+export type LiveAttackResult = z.infer<typeof LiveAttackResult>;
+
+export const LiveNormalResult = z.object({
+  pid: z.number().optional(),
+  state: z.string(),
+  interval_ms: z.number().optional(),
+});
+export type LiveNormalResult = z.infer<typeof LiveNormalResult>;
+
+export const LiveSimulationsResult = z.object({
+  attack: z.record(z.string(), z.unknown()),
+  normal: z.record(z.string(), z.unknown()),
+});
+export type LiveSimulationsResult = z.infer<typeof LiveSimulationsResult>;
+
+export const LiveAttackRecord = z.object({
+  attack_id: z.string(),
+  mode: z.number(),
+  pid: z.number().optional(),
+  state: z.string(),
+  started_at: z.string(),
+  stopped_at: z.string().nullable().optional(),
+  return_code: z.number().nullable().optional(),
+  termination_reason: z.string().nullable().optional(),
+  incident_id: z.string().nullable().optional(),
+});
+export type LiveAttackRecord = z.infer<typeof LiveAttackRecord>;
+
+export const LiveNormalRecord = z.object({
+  normal_id: z.string(),
+  pid: z.number().optional(),
+  state: z.string(),
+  started_at: z.string(),
+  stopped_at: z.string().nullable().optional(),
+  return_code: z.number().nullable().optional(),
+  termination_reason: z.string().nullable().optional(),
+  interval_ms: z.number().optional(),
+});
+export type LiveNormalRecord = z.infer<typeof LiveNormalRecord>;
+
+export const ResponseLatency = z.object({
+  first_anomalous_window_utc: z.string().nullable().optional(),
+  incident_confirmed_utc: z.string().nullable().optional(),
+  response_initiated_utc: z.string().nullable().optional(),
+  attack_terminated_utc: z.string().nullable().optional(),
+  detection_ms: z.number().nullable().optional(),
+  mitigation_ms: z.number().nullable().optional(),
+  detection_to_termination_ms: z.number().nullable().optional(),
+  attack_mode: z.number().nullable().optional(),
+});
+export type ResponseLatency = z.infer<typeof ResponseLatency>;
+
+/** Phase 7: Response Audit Trail Record */
+export const ResponseAuditRecord = z.object({
+  audit_id: z.string(),
+  incident_id: z.string(),
+  response_action: z.string(),
+  process_pid: z.number().nullable().optional(),
+  action_initiation_timestamp: z.string(),
+  process_termination_timestamp: z.string(),
+  return_code: z.number().nullable().optional(),
+  termination_reason: z.string(),
+  sniffer_continuity_status: z.enum(["PASS", "FAIL"]),
+  normal_traffic_continuity_status: z.enum(["PASS", "FAIL", "NOT_APPLICABLE"]),
+  recovery_verification_result: z.enum(["PASS", "FAIL", "IN_PROGRESS", "RESET_BY_ANOMALY"]),
+  final_response_status: z.enum(["MITIGATED", "VERIFIED_RECOVERED", "FAILED"]),
+  detection_latency_ms: z.number().nullable().optional(),
+  mitigation_latency_ms: z.number().nullable().optional(),
+  total_latency_ms: z.number().nullable().optional(),
+});
+export type ResponseAuditRecord = z.infer<typeof ResponseAuditRecord>;
+
+/** Phase 7: Automated Response Validation Checks */
+export const ValidationCheck = z.object({
+  status: z.enum(["PASS", "FAIL", "RUNNING", "NOT VERIFIED"]),
+  detail: z.string(),
+});
+export type ValidationCheck = z.infer<typeof ValidationCheck>;
+
+export const ResponseValidationStatus = z.object({
+  overall_status: z.enum(["PASS", "FAIL", "RUNNING", "NOT VERIFIED"]),
+  checks: z.object({
+    confirmed_incident_creation: ValidationCheck,
+    automated_response_initiation: ValidationCheck,
+    attack_simulator_termination: ValidationCheck,
+    actual_process_exit_status: ValidationCheck,
+    sniffer_process_continuity: ValidationCheck,
+    normal_traffic_continuity: ValidationCheck,
+    recovery_verification: ValidationCheck,
+  }),
+});
+export type ResponseValidationStatus = z.infer<typeof ResponseValidationStatus>;
+
+/** Phase 7: Response Reliability Metrics */
+export const ResponseReliabilityMetrics = z.object({
+  total_response_attempts: z.number(),
+  confirmed_successful_mitigations: z.number(),
+  failed_mitigations: z.number(),
+  unexpected_attack_process_exits: z.number(),
+  recovery_verification_success_rate: z.number().nullable().optional(),
+  average_detection_latency_ms: z.number().nullable().optional(),
+  average_mitigation_latency_ms: z.number().nullable().optional(),
+  average_recovery_duration_ms: z.number().nullable().optional(),
+});
+export type ResponseReliabilityMetrics = z.infer<typeof ResponseReliabilityMetrics>;
+
+/** Phase 7: Controlled Failure Scenario Testing Result */
+export const ResilienceScenarioResult = z.object({
+  scenario_id: z.string(),
+  scenario_name: z.string(),
+  expected_behavior: z.string(),
+  actual_result: z.string(),
+  timestamp: z.string(),
+  status: z.enum(["PASS", "FAIL"]),
+  diagnostic_evidence: z.record(z.string(), z.unknown()),
+});
+export type ResilienceScenarioResult = z.infer<typeof ResilienceScenarioResult>;
+
+export const LiveIncident = Incident.passthrough().extend({
+  analysis_id: z.string().optional(),
+  analysis_registered: z.boolean().optional(),
+  response_state: z.string().optional(),
+  response_result: z.record(z.string(), z.unknown()).optional(),
+  response_latency: ResponseLatency.optional(),
+});
+export type LiveIncident = z.infer<typeof LiveIncident>;
+
+export const LiveSession = z.object({
+  id: z.string(),
+  data_source: DataSource,
+  state: LiveState,
+  interface: z.string(),
+  capture_file: z.string(),
+  started_at: z.string(),
+  frames_captured: z.number(),
+  /** Completed windows scored incrementally by the saved model. */
+  windows: z.array(InferenceWindow),
+  /** Newest, possibly incomplete window that is not scored yet. */
+  pending_window_index: z.number().nullable(),
+  message: z.string().nullable(),
+  incidents: z.array(LiveIncident).optional(),
+  normal: LiveNormal.optional(),
+  attack: LiveAttack.optional(),
+  recovery: LiveRecovery.optional(),
+  attack_history: z.array(LiveAttackRecord).optional(),
+  normal_history: z.array(LiveNormalRecord).optional(),
+  response_audit_trail: z.array(ResponseAuditRecord).optional(),
+  response_validation: ResponseValidationStatus.optional(),
+  response_reliability: ResponseReliabilityMetrics.optional(),
+});
+export type LiveSession = z.infer<typeof LiveSession>;
+
+export const ApiErrorBody = z.object({ detail: z.union([z.string(), z.array(z.unknown())]) });

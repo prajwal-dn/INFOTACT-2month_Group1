@@ -1,0 +1,11 @@
+Attack simulator: HIGH-FREQUENCY mode
+CAN ID: 0x100, payload: FF FF, target interval: 1 ms
+Interface: vcan0 (virtual only). Press Ctrl+C to stop.
+
+Frames sent: 463 | write errors: 0
+Frames sent: 866 | write errors: 0
+Frames sent: 1326 | write errors: 0
+Frames sent: 1759 | write errors: 0
+
+Attack simulation stopped.
+Frames sent: 2167 | write errors: 0
