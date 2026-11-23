@@ -28,3 +28,5 @@ reports/*_inference.csv
 # Runtime-generated live CAN captures and uploads
 data/live_capture_*.csv
 data/uploads/
+
+node_modules/
